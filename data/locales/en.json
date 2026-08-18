@@ -1,0 +1,19 @@
+{
+  "greet": "Hello! I am your Government Revenue Department Assistant. I can help you apply for certificates such as Income, Domicile, Caste, Solvency, or Nativity. Which service do you need today?",
+  "welcome_income": "Certainly! I will start your Income Certificate application. First, please tell me your full name.",
+  "ask_income": "Thank you. What is your annual family income in Rupees?",
+  "ask_district": "Which district do you reside in?",
+  "ask_consent": "Do you consent to share your synthetic Aadhaar and personal details for validation? (Say 'Yes' or 'No')",
+  "ask_documents": "Your basic details are captured. Please upload the required documents: Identity Proof, Address Proof, and Income Proof.",
+  "ask_auth": "Let's perform synthetic Aadhaar verification. Please enter a 12-digit Aadhaar number and the 6-digit OTP (123456) sent to your mobile.",
+  "ask_payment": "The processing fee is Rs. 50. Please choose your payment method: UPI, Debit/Credit Card, or Net Banking.",
+  "payment_success": "Payment of Rs. 50 successful! Submitting your application...",
+  "payment_failed": "Payment failed. Please retry your payment.",
+  "application_submitted": "Your application has been successfully submitted. Your Application ID is {app_no}. Please keep this for tracking.",
+  "status_check": "Your application {app_no} status is: {status}.",
+  "correction_prompt": "To correct your details, please specify which field (e.g., name, income, district) you want to change.",
+  "escalated": "Your application has been escalated to a senior Revenue Officer for manual review. Case ID: {case_id}.",
+  "certificate_ready": "Congratulations! Your Income Certificate is ready. You can now download it.",
+  "consent_declined": "Consent is mandatory to process the application. Do you agree to provide consent?",
+  "general_error": "I couldn't understand that. Could you please repeat or select an option?"
+}

@@ -15,5 +15,10 @@
   "escalated": "Your application has been escalated to a senior Revenue Officer for manual review. Case ID: {case_id}.",
   "certificate_ready": "Congratulations! Your Income Certificate is ready. You can now download it.",
   "consent_declined": "Consent is mandatory to process the application. Do you agree to provide consent?",
-  "general_error": "I couldn't understand that. Could you please repeat or select an option?"
+  "general_error": "I couldn't understand that. Could you please repeat or select an option?",
+  "welcome_ncl": "Certainly! I will start your Non-Creamy Layer (NCL) Certificate application. First, please tell me your full name.",
+  "prerequisite_prompt": "Income Proof is required for NCL Certificate but you do not have it. Should I start an application for your Income Certificate first in this same chat?",
+  "dob_mismatch_prompt": "DOB mismatch detected. Aadhaar: 12-05-2002, School Record: 12-05-2003. Is 12-05-2002 your correct date of birth?",
+  "prerequisite_completed": "Prerequisite Income Certificate (ID: {app_no}) is approved! We will now automatically resume your NCL application.",
+  "ncl_completed": "Congratulations! Your OBC Non-Creamy Layer Certificate is ready. You can now download it."
 }

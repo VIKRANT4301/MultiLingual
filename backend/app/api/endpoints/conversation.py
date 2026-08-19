@@ -140,33 +140,33 @@ async def process_voice_message(
     """
     logger.info(f"Received voice upload for session {session_id}, size: {audio.size} bytes")
     
-    # Read/validate audio format
+    # Save audio file to process through ASR
+    import os
+    temp_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "data", "temp")
+    os.makedirs(temp_dir, exist_ok=True)
+    temp_path = os.path.join(temp_dir, audio.filename)
+    
     content = await audio.read()
+    with open(temp_path, "wb") as f:
+        f.write(content)
     
-    # Simulating STT (Speech-to-Text) (Section 8: Voice experience)
-    # In browser, Web Speech API will handle STT.
-    # For server upload, we check the audio name or use mock transcripts.
-    # To make this POC fully functional, we detect query words in the file name,
-    # or fallback to general demo query sentences.
-    file_name = audio.filename.lower()
-    transcript = "Hello, I want an income certificate" # default
+    # Process audio using IndicASRAdapter
+    from backend.app.services.speech_engine import IndicASRAdapter
+    asr = IndicASRAdapter()
+    asr_res = asr.transcribe_audio(temp_path, hint_language=language)
     
-    if "marathi" in file_name or "mr" in file_name:
-        transcript = "मला उत्पन्नाचा दाखला काढायचा आहे."
-    elif "hindi" in file_name or "hi" in file_name:
-        transcript = "मुझे आय प्रमाण पत्र चाहिए"
-    elif "status" in file_name:
-        transcript = "Check my application status"
-    elif "aadhaar" in file_name:
-        # Simulate voice dictation of Aadhaar
-        transcript = "9999 9999 9999"
+    # Clean up temp file
+    try:
+        os.remove(temp_path)
+    except Exception:
+        pass
 
     # Forward to the text processor
     request_payload = schemas.MessageRequest(
         session_id=session_id,
-        text=transcript,
+        text=asr_res["transcript"],
         channel=channel,
-        language=language
+        language=asr_res["detected_language"]
     )
     
     return await process_chat_message(request_payload, db)

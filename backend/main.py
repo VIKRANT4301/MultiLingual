@@ -97,9 +97,9 @@ def seed_database():
             {
                 "id": "domicile_certificate",
                 "name": "Domicile Certificate",
-                "description": "Certificate proving residency in the state.",
+                "description": "Certificate proving residency in the state for 15+ years.",
                 "required_documents": ["identity_proof", "address_proof", "residency_proof"],
-                "fee": 60.0,
+                "fee": 50.0,
                 "processing_days": 15
             },
             {
@@ -107,6 +107,14 @@ def seed_database():
                 "name": "Caste Certificate",
                 "description": "Certificate proving caste community classification.",
                 "required_documents": ["identity_proof", "caste_proof"],
+                "fee": 50.0,
+                "processing_days": 10
+            },
+            {
+                "id": "nativity_certificate",
+                "name": "Nativity Certificate",
+                "description": "Certificate proving origin place nativity.",
+                "required_documents": ["identity_proof", "birth_proof"],
                 "fee": 50.0,
                 "processing_days": 10
             },
@@ -119,12 +127,164 @@ def seed_database():
                 "processing_days": 21
             },
             {
-                "id": "nativity_certificate",
-                "name": "Nativity Certificate",
-                "description": "Certificate proving origin place nativity.",
-                "required_documents": ["identity_proof", "birth_proof"],
+                "id": "obc_ncl_certificate",
+                "name": "OBC Non-Creamy Layer Certificate",
+                "description": "OBC Non-Creamy Layer status for education and employment.",
+                "required_documents": ["identity_proof", "caste_proof", "income_proof", "address_proof"],
                 "fee": 50.0,
+                "processing_days": 15
+            },
+            {
+                "id": "ews_certificate",
+                "name": "EWS Certificate",
+                "description": "Economically Weaker Section eligibility certificate.",
+                "required_documents": ["identity_proof", "income_proof", "property_documents"],
+                "fee": 50.0,
+                "processing_days": 15
+            },
+            {
+                "id": "residence_certificate",
+                "name": "Residence Certificate",
+                "description": "Certificate verifying current residence address.",
+                "required_documents": ["identity_proof", "address_proof"],
+                "fee": 30.0,
+                "processing_days": 7
+            },
+            {
+                "id": "agricultural_land_certificate",
+                "name": "Agricultural Land Certificate",
+                "description": "Certificate proving land tenancy or ownership.",
+                "required_documents": ["identity_proof", "land_records"],
+                "fee": 75.0,
                 "processing_days": 10
+            },
+            {
+                "id": "minority_certificate",
+                "name": "Minority Certificate",
+                "description": "Certificate proving minority religion status.",
+                "required_documents": ["identity_proof", "community_proof"],
+                "fee": 50.0,
+                "processing_days": 7
+            },
+            {
+                "id": "widow_certificate",
+                "name": "Widow Certificate",
+                "description": "Certificate proving death of husband.",
+                "required_documents": ["identity_proof", "marriage_certificate", "death_certificate"],
+                "fee": 0.0,
+                "processing_days": 7
+            },
+            {
+                "id": "single_woman_certificate",
+                "name": "Single Woman Certificate",
+                "description": "Certificate proving single marital status.",
+                "required_documents": ["identity_proof", "affidavit"],
+                "fee": 0.0,
+                "processing_days": 7
+            },
+            {
+                "id": "handicap_disability_certificate",
+                "name": "Disability Certificate",
+                "description": "Certificate proving physical handicap status.",
+                "required_documents": ["identity_proof", "medical_report"],
+                "fee": 0.0,
+                "processing_days": 15
+            },
+            {
+                "id": "senior_citizen_certificate",
+                "name": "Senior Citizen Certificate",
+                "description": "Certificate verifying age 60 and above.",
+                "required_documents": ["identity_proof", "age_proof"],
+                "fee": 0.0,
+                "processing_days": 5
+            },
+            {
+                "id": "birth_certificate",
+                "name": "Birth Certificate",
+                "description": "Certificate registering birth details.",
+                "required_documents": ["identity_proof", "hospital_records"],
+                "fee": 25.0,
+                "processing_days": 7
+            },
+            {
+                "id": "death_certificate",
+                "name": "Death Certificate",
+                "description": "Certificate registering death details.",
+                "required_documents": ["identity_proof", "hospital_records"],
+                "fee": 25.0,
+                "processing_days": 7
+            },
+            {
+                "id": "marriage_certificate",
+                "name": "Marriage Certificate",
+                "description": "Certificate registering marriage details.",
+                "required_documents": ["identity_proof", "witness_proof", "marriage_photos"],
+                "fee": 100.0,
+                "processing_days": 15
+            },
+            {
+                "id": "legal_heir_certificate",
+                "name": "Legal Heir Certificate",
+                "description": "Certificate establishing succession family tree.",
+                "required_documents": ["identity_proof", "death_certificate", "family_tree_affidavit"],
+                "fee": 100.0,
+                "processing_days": 30
+            },
+            {
+                "id": "no_objection_certificate",
+                "name": "No Objection Certificate",
+                "description": "Purpose-specific NOC.",
+                "required_documents": ["identity_proof", "application_form", "supporting_documents"],
+                "fee": 50.0,
+                "processing_days": 7
+            },
+            {
+                "id": "character_certificate",
+                "name": "Character Certificate",
+                "description": "Police verified character certificate.",
+                "required_documents": ["identity_proof", "passport_photo"],
+                "fee": 50.0,
+                "processing_days": 15
+            },
+            {
+                "id": "non_encumbrance_certificate",
+                "name": "Non-Encumbrance Certificate",
+                "description": "Certificate verifying clear property title.",
+                "required_documents": ["identity_proof", "property_documents"],
+                "fee": 200.0,
+                "processing_days": 15
+            },
+            {
+                "id": "land_conversion_certificate",
+                "name": "Land Conversion Certificate",
+                "description": "Conversion from agricultural to non-agricultural land.",
+                "required_documents": ["identity_proof", "survey_documents", "land_records"],
+                "fee": 500.0,
+                "processing_days": 30
+            },
+            {
+                "id": "patta_transfer_certificate",
+                "name": "Patta Transfer Certificate",
+                "description": "Transfer of land ownership title records.",
+                "required_documents": ["identity_proof", "patta_copy", "sale_deed"],
+                "fee": 300.0,
+                "processing_days": 15
+            },
+            {
+                "id": "unemployed_certificate",
+                "name": "Unemployed Certificate",
+                "description": "Certificate verifying current unemployment status.",
+                "required_documents": ["identity_proof", "affidavit"],
+                "fee": 30.0,
+                "processing_days": 7
+            },
+            {
+                "id": "student_certificate",
+                "name": "Student Certificate",
+                "description": "Certificate proving enrollment in school/college.",
+                "required_documents": ["identity_proof", "school_college_letter"],
+                "fee": 20.0,
+                "processing_days": 3
             }
         ]
 
@@ -133,6 +293,42 @@ def seed_database():
             if not existing:
                 srv = models.Service(**s_data)
                 db.add(srv)
+            else:
+                # Update existing records to ensure we have all 25 corrected in DB
+                for key, val in s_data.items():
+                    setattr(existing, key, val)
+        db.commit()
+
+        # Seed Service Rules
+        rules = [
+            {
+                "service_id": "income_certificate",
+                "rule_name": "Max Income Threshold Check",
+                "rule_condition": "annual_income <= 1500000",
+                "error_message": "Income exceeds maximum threshold (Rs. 15 Lakhs)"
+            },
+            {
+                "service_id": "obc_ncl_certificate",
+                "rule_name": "Creamy Layer Check",
+                "rule_condition": "annual_income <= 800000",
+                "error_message": "Income exceeds Non-Creamy Layer threshold (Rs. 8 Lakhs)"
+            },
+            {
+                "service_id": "ews_certificate",
+                "rule_name": "EWS Income Check",
+                "rule_condition": "annual_income <= 800000",
+                "error_message": "Income exceeds EWS category threshold (Rs. 8 Lakhs)"
+            }
+        ]
+
+        for r_data in rules:
+            existing = db.query(models.ServiceRule).filter(
+                models.ServiceRule.service_id == r_data["service_id"],
+                models.ServiceRule.rule_name == r_data["rule_name"]
+            ).first()
+            if not existing:
+                rule = models.ServiceRule(**r_data)
+                db.add(rule)
         db.commit()
 
         # 2. Seed Users & Personas (Section 22 & 35)

@@ -1,4 +1,8 @@
 import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 class Settings:
     PROJECT_NAME: str = "Multilingual Voice-First Revenue Services Platform"

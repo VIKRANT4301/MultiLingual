@@ -381,7 +381,6 @@ def seed_database():
                 preferred_language="mr"
             )
             db.add(c_profile)
-        
         db.commit()
         logger.info("Initial services, users, and synthetic personas seeded.")
     except Exception as e:
@@ -389,3 +388,15 @@ def seed_database():
         db.rollback()
     finally:
         db.close()
+
+# Mount static frontend build files at the very end of startup
+frontend_dist_dir = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
+if not os.path.exists(frontend_dist_dir):
+    os.makedirs(frontend_dist_dir, exist_ok=True)
+    placeholder_file = os.path.join(frontend_dist_dir, "index.html")
+    if not os.path.exists(placeholder_file):
+        with open(placeholder_file, "w") as f:
+            f.write("<h1>Loading React Native Frontend...</h1>")
+
+app.mount("/", StaticFiles(directory=frontend_dist_dir, html=True), name="frontend")
+

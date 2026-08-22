@@ -62,7 +62,38 @@ class DocumentOut(BaseModel):
     file_path: str
     status: str
     verification_result: Optional[str] = None
+    version: int
+    is_latest: bool
     created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class DocumentVersionOut(BaseModel):
+    id: int
+    version: int
+    file_name: str
+    status: str
+    verification_result: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class DocumentDetailOut(BaseModel):
+    doc_type: str
+    latest_version: DocumentOut
+    versions: List[DocumentVersionOut]
+
+class BulkUploadJobOut(BaseModel):
+    id: str
+    application_id: int
+    total_files: int
+    processed_files: int
+    failed_files: int
+    status: str
+    created_at: datetime
+    updated_at: datetime
 
     class Config:
         from_attributes = True
@@ -138,6 +169,7 @@ class MessageResponse(BaseModel):
     audio_data: Optional[str] = None # Base64 audio if TTS processed on server (we'll mostly do browser TTS)
     is_blocked: bool = False
     block_reason: Optional[str] = None
+    redirect_to_service: Optional[str] = None
 
 # Correction & Escalation Schemas
 class CorrectionRequest(BaseModel):

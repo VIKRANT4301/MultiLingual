@@ -3,6 +3,7 @@ import logging
 import random
 from typing import Dict, Any, List, Tuple
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 from backend.app.models.models import (
     Application, ApplicationState, Document, Payment, 
     AuditLog, Service, Escalation, Certificate
@@ -20,6 +21,7 @@ STATES = [
     "FORM_VALIDATION",
     "DOCUMENT_COLLECTION",
     "DOCUMENT_VALIDATION",
+    "PREREQUISITE_REDIRECT",
     "AUTHENTICATION",
     "FEE_CALCULATION",
     "PAYMENT",
@@ -47,6 +49,14 @@ class StateMachineOrchestrator:
         if app_state:
             app = db.query(Application).filter(Application.id == app_state.application_id).first()
             
+            # Ensure service_id is synced to state_data for compatibility
+            state_data = dict(app_state.state_data)
+            if "service_id" not in state_data or state_data["service_id"] != app.service_id:
+                state_data["service_id"] = app.service_id
+                app_state.state_data = state_data
+                flag_modified(app_state, "state_data")
+                db.commit()
+
             # Redis Hot Cache Simulation: Sync session state to Vault
             from backend.app.services.task_queue import RedisContextVault
             RedisContextVault.set(session_id, app_state.state_data)
@@ -76,6 +86,7 @@ class StateMachineOrchestrator:
             state_data={
                 "session_id": session_id,
                 "application_no": app_no,
+                "service_id": app.service_id,
                 "full_name": None,
                 "annual_income": None,
                 "district": None,
@@ -116,6 +127,80 @@ class StateMachineOrchestrator:
         return app_state, app
 
     @staticmethod
+    def _validate_uploaded_documents(state_data: Dict[str, Any], required_docs: List[str], ocr_results: Dict[str, Any]) -> bool:
+        # Helper to calculate name string similarity
+        def calculate_similarity(s1: str, s2: str) -> float:
+            if not s1 or not s2:
+                return 0.0
+            import re
+            words1 = set(re.sub(r'[^a-z0-9\s]', '', s1.lower()).split())
+            words2 = set(re.sub(r'[^a-z0-9\s]', '', s2.lower()).split())
+            if not words1 or not words2:
+                return 0.0
+            intersect = words1.intersection(words2)
+            return len(intersect) / max(len(words1), len(words2))
+
+        form_name = state_data.get("full_name") or ""
+        form_district = state_data.get("district") or ""
+        form_income = state_data.get("annual_income")
+        
+        docs_uploaded = state_data.get("documents_uploaded", {})
+        state_data["document_validation_errors"] = {}
+        mismatches_found = False
+
+        for doc_type in required_docs:
+            status = docs_uploaded.get(doc_type, "")
+            if not status or status == "Awaiting Upload":
+                continue
+                
+            ocr_data = ocr_results.get(doc_type, {})
+            score = 1.0
+            mismatch_reason = None
+            
+            if doc_type == "identity_proof":
+                ocr_name = ocr_data.get("full_name") or ""
+                score = calculate_similarity(form_name, ocr_name)
+                if score < 0.85:
+                    mismatch_reason = "Name mismatch"
+                    
+            elif doc_type == "address_proof":
+                ocr_address = ocr_data.get("address") or ""
+                if form_district.lower() not in ocr_address.lower():
+                    score = 0.0
+                    mismatch_reason = "District mismatch"
+                    
+            elif doc_type == "income_proof":
+                ocr_income = ocr_data.get("annual_income")
+                if form_income is not None and ocr_income is not None:
+                    fi = float(form_income)
+                    oi = float(ocr_income)
+                    score = 1.0 - abs(fi - oi) / max(fi, oi, 1.0)
+                else:
+                    score = 1.0
+                if score < 0.90:
+                    mismatch_reason = "Income mismatch"
+                    
+            elif doc_type == "caste_proof":
+                ocr_name = ocr_data.get("full_name") or ""
+                score = calculate_similarity(form_name, ocr_name)
+                if score < 0.85:
+                    mismatch_reason = "Name mismatch"
+
+            # Update document status and matching score
+            if mismatch_reason:
+                mismatches_found = True
+                score_pct = int(score * 100)
+                mismatch_str = f"MISMATCH: {mismatch_reason} ({score_pct}% Match)"
+                docs_uploaded[doc_type] = mismatch_str
+                state_data["document_validation_errors"][doc_type] = f"{mismatch_reason} (Accuracy: {score_pct}%)"
+            else:
+                score_pct = int(score * 100)
+                docs_uploaded[doc_type] = f"VALIDATED ({score_pct}% Match)"
+
+        state_data["documents_uploaded"] = docs_uploaded
+        return mismatches_found
+
+    @staticmethod
     def process_state_transition(
         db: Session, 
         app_state: ApplicationState, 
@@ -129,7 +214,6 @@ class StateMachineOrchestrator:
         Returns the new state.
         """
         state_data = dict(app_state.state_data)
-        current = app_state.current_state
         
         # Track channel history for Omnichannel Context Persistence
         if "channel_history" not in state_data:
@@ -153,10 +237,85 @@ class StateMachineOrchestrator:
             if key in entities and entities[key] is not None:
                 state_data[key] = entities[key]
 
-        # Fetch Service Details dynamically from DB
+        # Loop to process multiple transient states in one turn
+        transition_occurred = True
+        loop_count = 0
+        while transition_occurred and loop_count < 10:
+            transition_occurred = False
+            current = app_state.current_state
+            loop_count += 1
+            
+            # Execute one step of transition rules
+            StateMachineOrchestrator._run_transition_step(db, app_state, app, entities, channel, state_data)
+            
+            if app_state.current_state != current:
+                transition_occurred = True
+
+        # Process corrections if explicitly requested
+        if entities.get("correction_field") and entities.get("correction_value"):
+            field = entities["correction_field"]
+            val = entities["correction_value"]
+            if field in ["full_name", "annual_income", "district"]:
+                state_data[field] = val
+                app_state.current_state = "FORM_VALIDATION"
+                app.status = "UNDER_REVIEW"
+                
+            # Check state change outside the main conditional rules
+            if app_state.current_state != current:
+                transition_occurred = True
+
+        # Process Escalation triggers
+        if app_state.current_state == "ESCALATION":
+            app.status = "REJECTED"
+            from backend.app.models.models import Escalation
+            esc_exists = db.query(Escalation).filter(Escalation.application_id == app.id).first()
+            if not esc_exists:
+                case_id = f"ESC-2026-{random.randint(1000, 9999)}"
+                esc = Escalation(
+                    application_id=app.id,
+                    case_id=case_id,
+                    reason=state_data.get("escalation_reason", "AI confidence check failed"),
+                    status="PENDING",
+                    conversation_context=f"Session: {state_data.get('session_id')}",
+                    failed_steps=["DOCUMENT_VALIDATION"],
+                    documents_status=[{"type": k, "status": v} for k, v in state_data.get("documents_uploaded", {}).items()],
+                    priority="HIGH"
+                )
+                db.add(esc)
+                
+                audit = AuditLog(
+                    actor="workflow_engine",
+                    action="ESCALATION_CREATED",
+                    application_id=app.id,
+                    channel=channel,
+                    result="SUCCESS",
+                    metadata_json={"case_id": case_id, "reason": esc.reason}
+                )
+                db.add(audit)
+
+        # Write back changes and sync to Redis cache vault
+        app_state.state_data = state_data
+        flag_modified(app_state, "state_data")
+        db.commit()
+        
+        from backend.app.services.task_queue import RedisContextVault
+        RedisContextVault.set(state_data["session_id"], state_data)
+
+        return app_state.current_state
+
+    @staticmethod
+    def _run_transition_step(
+        db: Session,
+        app_state: ApplicationState,
+        app: Application,
+        entities: Dict[str, Any],
+        channel: str,
+        state_data: Dict[str, Any]
+    ) -> None:
+        current = app_state.current_state
         service = db.query(Service).filter(Service.id == app.service_id).first()
         required_docs = service.required_documents if service else ["identity_proof", "address_proof"]
-
+        ocr_results = state_data.get("ocr_results", {})
         # 1. State: START
         if current == "START":
             app_state.current_state = "LANGUAGE_SELECTION"
@@ -173,6 +332,7 @@ class StateMachineOrchestrator:
                     app.service_id = "income_certificate"
                 else:
                     app.service_id = "obc_ncl_certificate"
+                state_data["service_id"] = app.service_id
                 db.commit()
             app_state.current_state = "INFORMATION_COLLECTION"
 
@@ -262,18 +422,22 @@ class StateMachineOrchestrator:
         elif current == "DOCUMENT_COLLECTION":
             # Handle Self-Recovering Prerequisite Loop if user states they lack Income Proof
             if app.service_id == "obc_ncl_certificate" and entities.get("lacks_income_proof") is True:
-                # Transition to PREREQUISITE_PROMPT
-                app_state.current_state = "PREREQUISITE_PROMPT"
+                # Transition to PREREQUISITE_REDIRECT (halt & redirect)
+                app_state.current_state = "PREREQUISITE_REDIRECT"
                 state_data["lacks_income_proof"] = True
+                state_data["redirect_to_service"] = "income_certificate"
             else:
+                mismatches_found = StateMachineOrchestrator._validate_uploaded_documents(state_data, required_docs, ocr_results)
+                
                 docs_uploaded = state_data.get("documents_uploaded", {})
                 all_uploaded = True
                 for r_doc in required_docs:
-                    if not docs_uploaded.get(r_doc):
+                    status = docs_uploaded.get(r_doc, "")
+                    if not status or status == "Awaiting Upload" or "MISMATCH" in status:
                         all_uploaded = False
                         break
                 
-                if all_uploaded:
+                if all_uploaded and not mismatches_found:
                     app_state.current_state = "DOCUMENT_VALIDATION"
 
         # 8. State: PREREQUISITE_PROMPT
@@ -305,6 +469,7 @@ class StateMachineOrchestrator:
                     state_data={
                         "session_id": state_data["session_id"],
                         "application_no": inc_app_no,
+                        "service_id": "income_certificate",
                         "full_name": state_data.get("full_name"),
                         "district": state_data.get("district"),
                         "annual_income": 450000.0, # Seed a valid value
@@ -342,6 +507,11 @@ class StateMachineOrchestrator:
                 # Cancelled. Go to escalation
                 app_state.current_state = "ESCALATION"
                 state_data["escalation_reason"] = "User declined starting prerequisite Income Certificate flow"
+
+        # New State: PREREQUISITE_REDIRECT (halt & redirect)
+        elif current == "PREREQUISITE_REDIRECT":
+            # Halt state, wait for redirection on client side
+            state_data["redirect_to_service"] = "income_certificate"
 
         # 9. State: NESTED_INCOME_FLOW
         elif current == "NESTED_INCOME_FLOW":
@@ -413,30 +583,26 @@ class StateMachineOrchestrator:
 
         # 10. State: DOCUMENT_VALIDATION
         elif current == "DOCUMENT_VALIDATION":
-            # Document validation & Evidence Graph check
-            docs_uploaded = state_data.get("documents_uploaded", {})
-            ocr_results = state_data.get("ocr_results", {})
+            mismatches_found = StateMachineOrchestrator._validate_uploaded_documents(state_data, required_docs, ocr_results)
             
-            all_validated = True
-            for doc_type, status in docs_uploaded.items():
-                if status != "VALIDATED":
-                    all_validated = False
-            
-            if all_validated:
-                # Scenario 1: Non-Creamy Layer DOB Mismatch (Image 1 check)
-                # Verify Aadhaar DOB vs Caste Proof DOB
+            if mismatches_found:
+                app_state.current_state = "DOCUMENT_VALIDATION"
+                state_data["mismatch_detected"] = True
+                state_data["readiness_score"] = 60
+            else:
+                state_data["mismatch_detected"] = False
+                
+                # Check Scenario 1: DOB Mismatch
                 dob_aadhaar = ocr_results.get("identity_proof", {}).get("dob")
                 dob_caste = ocr_results.get("caste_proof", {}).get("dob")
                 
-                # If there's a mismatch and user hasn't resolved it yet, trigger DOB correction
                 if dob_aadhaar and dob_caste and dob_aadhaar != dob_caste and not state_data.get("dob_mismatch_resolved"):
                     app_state.current_state = "DOB_MISMATCH_PROMPT"
                     state_data["dob_mismatch_detected"] = True
-                    state_data["readiness_score"] = 87 # Needs Minor Fix score matching diagram 1
+                    state_data["readiness_score"] = 87
                 else:
                     # Proceed to AUTHENTICATION
                     app_state.current_state = "AUTHENTICATION"
-                    # Set readiness score: if prerequisite completed, it's 92/100 (Image 2) else 100/100
                     if state_data.get("prerequisite_completed"):
                         state_data["readiness_score"] = 92
                     else:
@@ -555,6 +721,10 @@ class StateMachineOrchestrator:
                 state_data[field] = val
                 app_state.current_state = "FORM_VALIDATION"
                 app.status = "UNDER_REVIEW"
+                
+            # Check state change outside the main conditional rules
+            if app_state.current_state != current:
+                transition_occurred = True
 
         # Process Escalation triggers
         if app_state.current_state == "ESCALATION":
@@ -587,6 +757,7 @@ class StateMachineOrchestrator:
 
         # Write back changes and sync to Redis cache vault
         app_state.state_data = state_data
+        flag_modified(app_state, "state_data")
         db.commit()
         
         from backend.app.services.task_queue import RedisContextVault

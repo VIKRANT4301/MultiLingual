@@ -83,6 +83,8 @@ class Document(Base):
     file_path = Column(String, nullable=False)
     status = Column(String, default="PENDING") # PENDING, VALIDATED, FAILED, REVIEW_REQUIRED
     verification_result = Column(String, nullable=True)
+    version = Column(Integer, default=1)
+    is_latest = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     
     application = relationship("Application", back_populates="documents")
@@ -213,3 +215,15 @@ class ServiceRule(Base):
     rule_name = Column(String, nullable=False)
     rule_condition = Column(String, nullable=False) # e.g. "income <= 80000"
     error_message = Column(String, nullable=False)
+
+class BulkUploadJob(Base):
+    __tablename__ = "bulk_upload_jobs"
+    
+    id = Column(String, primary_key=True, index=True)
+    application_id = Column(Integer, ForeignKey("applications.id"), nullable=False)
+    total_files = Column(Integer, default=0)
+    processed_files = Column(Integer, default=0)
+    failed_files = Column(Integer, default=0)
+    status = Column(String, default="PROCESSING") # PROCESSING, COMPLETED, FAILED, PARTIAL_FAILURE
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)

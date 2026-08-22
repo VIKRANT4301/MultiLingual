@@ -1,7 +1,9 @@
 import logging
+import httpx
 from sqlalchemy.orm import Session
 from backend.app.services.state_machine import StateMachineOrchestrator
 from backend.app.agents.llm_provider import LocalLLMProvider
+from backend.app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -11,10 +13,9 @@ class WhatsAppAdapter:
 
     async def receive_message(self, db: Session, phone_number: str, text: str) -> dict:
         """
-        Simulates receiving a WhatsApp text from a citizen.
-        Uses phone number as a unique seed to map/create a session ID.
+        Receives a WhatsApp text from a citizen.
+        If WhatsApp Cloud credentials are set, sends the reply back to the real device.
         """
-        # Seed sessionId based on phone
         session_id = f"wa-session-{phone_number}"
         logger.info(f"[WhatsApp Adapter] Received message from {phone_number}: {text}")
         
@@ -24,7 +25,6 @@ class WhatsAppAdapter:
         # 2. Process conversation message through LLM and State Machine
         state_data = dict(app_state.state_data)
         
-        # Process the input text with Local LLM (always local-first for messaging info)
         result = await self.llm.process_message(
             text=text,
             current_state=app_state.current_state,
@@ -43,8 +43,36 @@ class WhatsAppAdapter:
             channel="WhatsApp"
         )
         
-        # Format WhatsApp text reply
         response_text = result["text"]
+
+        # 3. If Meta Cloud API keys are provided, send a real WhatsApp message
+        token = settings.WHATSAPP_API_TOKEN
+        phone_id = settings.WHATSAPP_PHONE_NUMBER_ID
+        if token and phone_id:
+            url = f"https://graph.facebook.com/v20.0/{phone_id}/messages"
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "messaging_product": "whatsapp",
+                "recipient_type": "individual",
+                "to": phone_number,
+                "type": "text",
+                "text": {
+                    "body": response_text
+                }
+            }
+            try:
+                logger.info(f"[WhatsApp Adapter] Sending real WhatsApp Cloud API request to {phone_number}...")
+                async with httpx.AsyncClient() as client:
+                    response = await client.post(url, headers=headers, json=payload, timeout=10.0)
+                if response.status_code == 200:
+                    logger.info(f"[WhatsApp Adapter] Real WhatsApp message dispatched successfully to {phone_number}.")
+                else:
+                    logger.error(f"[WhatsApp Adapter] Meta Graph API returned error {response.status_code}: {response.text}")
+            except Exception as e:
+                logger.error(f"[WhatsApp Adapter] Failed to dispatch real WhatsApp message: {e}")
         
         return {
             "to": phone_number,

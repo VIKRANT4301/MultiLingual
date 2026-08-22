@@ -20,5 +20,7 @@
   "prerequisite_prompt": "Income Proof is required for NCL Certificate but you do not have it. Should I start an application for your Income Certificate first in this same chat?",
   "dob_mismatch_prompt": "DOB mismatch detected. Aadhaar: 12-05-2002, School Record: 12-05-2003. Is 12-05-2002 your correct date of birth?",
   "prerequisite_completed": "Prerequisite Income Certificate (ID: {app_no}) is approved! We will now automatically resume your NCL application.",
-  "ncl_completed": "Congratulations! Your OBC Non-Creamy Layer Certificate is ready. You can now download it."
+  "ncl_completed": "Congratulations! Your OBC Non-Creamy Layer Certificate is ready. You can now download it.",
+  "prerequisite_redirect": "Process Halted: An Income Certificate is required to apply for the OBC NCL Certificate. Since you don't have it, we are halting this application and redirecting you to apply for an Income Certificate first.",
+  "ask_documents_mismatch": "Document verification failed! We found the following mismatches:\n{mismatch_details}\nPlease re-upload the valid documents."
 }

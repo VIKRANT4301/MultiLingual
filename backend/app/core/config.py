@@ -22,6 +22,16 @@ class Settings:
     # Cloud AI credentials (if provided)
     CLOUD_LLM_URL: str = os.getenv("CLOUD_LLM_URL", "")
     CLOUD_LLM_API_KEY: str = os.getenv("CLOUD_LLM_API_KEY", "")
+
+    # Groq & OpenRouter settings
+    GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
+    GROQ_MODEL: str = os.getenv("GROQ_MODEL", "llama3-8b-8192")
+    OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
+    OPENROUTER_MODEL: str = os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.1-8b-instruct:free")
+
+    # WhatsApp Cloud API configurations
+    WHATSAPP_API_TOKEN: str = os.getenv("WHATSAPP_API_TOKEN", "")
+    WHATSAPP_PHONE_NUMBER_ID: str = os.getenv("WHATSAPP_PHONE_NUMBER_ID", "")
     
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
 

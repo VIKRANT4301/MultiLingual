@@ -9,8 +9,9 @@ from backend.app.core.database import get_db
 from backend.app.security.auth import get_current_user, RoleChecker
 from backend.app.models.models import (
     Application, Document, DocumentExtraction, AuditLog, 
-    Escalation, Certificate, User, Citizen
+    Escalation, Certificate, User, Citizen, BulkUploadJob
 )
+import uuid
 from backend.app.schemas import schemas
 from backend.app.adapters.ocr_adapter import LocalOCRProvider
 
@@ -62,23 +63,7 @@ def get_application(
             
     return app
 
-@router.post("/documents/upload")
-async def upload_document(
-    application_id: int = Form(...),
-    doc_type: str = Form(...), # identity_proof, address_proof, income_proof
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db)
-):
-    """
-    Saves document file locally, checks structure/size,
-    runs simulated OCR, and updates application state.
-    """
-    app = db.query(Application).filter(Application.id == application_id).first()
-    if not app:
-        raise HTTPException(status_code=404, detail="Application not found")
-        
-    # Validation checks (mime and size)
-    # File size validation (limit to 10MB)
+async def _process_document_upload(db: Session, app: Application, doc_type: str, file: UploadFile) -> Dict[str, Any]:
     content = await file.read()
     if len(content) > 10 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="File too large. Max size is 10MB.")
@@ -87,8 +72,21 @@ async def upload_document(
     if ext not in [".pdf", ".jpg", ".jpeg", ".png"]:
         raise HTTPException(status_code=400, detail="Invalid file type. Only PDF, JPG, JPEG, PNG are supported.")
 
-    # Save locally
-    safe_name = f"app_{application_id}_{doc_type}{ext}"
+    # Get existing documents for this doc_type to determine next version
+    existing_docs = db.query(Document).filter(
+        Document.application_id == app.id, Document.doc_type == doc_type
+    ).all()
+
+    next_version = 1
+    if existing_docs:
+        next_version = max(d.version for d in existing_docs) + 1
+        # Set existing latest to False
+        for d in existing_docs:
+            d.is_latest = False
+        db.commit()
+
+    # Save file with unique name containing version
+    safe_name = f"app_{app.id}_{doc_type}_v{next_version}{ext}"
     file_path = os.path.join(DOCS_DIR, safe_name)
     with open(file_path, "wb") as f:
         f.write(content)
@@ -100,34 +98,27 @@ async def upload_document(
         application_id=app.id,
         channel=app.channel,
         result="SUCCESS",
-        metadata_json={"doc_type": doc_type, "file_name": file.filename}
+        metadata_json={"doc_type": doc_type, "file_name": file.filename, "version": next_version}
     )
     db.add(audit)
     db.commit()
 
-    # Create Document row in DB
-    db_doc = db.query(Document).filter(
-        Document.application_id == app.id, Document.doc_type == doc_type
-    ).first()
-    
-    if db_doc:
-        db_doc.file_name = file.filename
-        db_doc.file_path = file_path
-        db_doc.status = "PENDING"
-    else:
-        db_doc = Document(
-            application_id=app.id,
-            doc_type=doc_type,
-            file_name=file.filename,
-            file_path=file_path,
-            status="PENDING"
-        )
-        db.add(db_doc)
+    # Create new Document row (versioned)
+    db_doc = Document(
+        application_id=app.id,
+        doc_type=doc_type,
+        file_name=file.filename,
+        file_path=file_path,
+        status="PENDING",
+        version=next_version,
+        is_latest=True
+    )
+    db.add(db_doc)
     db.commit()
     db.refresh(db_doc)
 
     # Trigger OCR Extraction simulation
-    ocr_result = ocr_provider.perform_ocr(file_path, doc_type)
+    ocr_result = ocr_provider.perform_ocr(file_path, doc_type, application_id=app.id, db=db)
     
     # Save extraction record
     db_extract = db.query(DocumentExtraction).filter(DocumentExtraction.document_id == db_doc.id).first()
@@ -177,7 +168,7 @@ async def upload_document(
             application_id=app.id,
             channel=app.channel,
             result=db_doc.status,
-            metadata_json={"doc_type": doc_type, "confidence": ocr_result.get("confidence")}
+            metadata_json={"doc_type": doc_type, "confidence": ocr_result.get("confidence"), "version": next_version}
         )
         db.add(audit_val)
         db.commit()
@@ -191,8 +182,241 @@ async def upload_document(
         "status": db_doc.status,
         "ocr_fields": ocr_result.get("extracted_fields"),
         "confidence": ocr_result.get("confidence"),
-        "error": ocr_result.get("error")
+        "error": ocr_result.get("error"),
+        "version": db_doc.version
     }
+
+@router.post("/documents/upload")
+async def upload_document(
+    application_id: int = Form(...),
+    doc_type: str = Form(...), # identity_proof, address_proof, income_proof
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
+    """
+    Saves document file locally, checks structure/size,
+    runs simulated OCR, and updates application state (with versioning).
+    """
+    app = db.query(Application).filter(Application.id == application_id).first()
+    if not app:
+        raise HTTPException(status_code=404, detail="Application not found")
+        
+    return await _process_document_upload(db, app, doc_type, file)
+
+@router.get("/{id}/documents", response_model=List[schemas.DocumentOut])
+def list_application_documents(
+    id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Lists the latest versions of all documents for a given application.
+    """
+    app = db.query(Application).filter(Application.id == id).first()
+    if not app:
+        raise HTTPException(status_code=404, detail="Application not found")
+        
+    return db.query(Document).filter(
+        Document.application_id == id, Document.is_latest == True
+    ).all()
+
+@router.get("/{id}/documents/{doc_type}", response_model=schemas.DocumentDetailOut)
+def get_document_details(
+    id: int,
+    doc_type: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Retrieves full detail (latest + version history) of a specific document type.
+    """
+    app = db.query(Application).filter(Application.id == id).first()
+    if not app:
+        raise HTTPException(status_code=404, detail="Application not found")
+        
+    latest = db.query(Document).filter(
+        Document.application_id == id, Document.doc_type == doc_type, Document.is_latest == True
+    ).first()
+    
+    if not latest:
+        raise HTTPException(status_code=404, detail=f"No document of type {doc_type} found for this application")
+        
+    versions = db.query(Document).filter(
+        Document.application_id == id, Document.doc_type == doc_type
+    ).order_by(Document.version.desc()).all()
+    
+    return {
+        "doc_type": doc_type,
+        "latest_version": latest,
+        "versions": versions
+    }
+
+@router.post("/{id}/documents/{doc_type}/reupload")
+async def reupload_document(
+    id: int,
+    doc_type: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
+    """
+    Re-uploads a document. Automatically flags existing records as outdated,
+    increments the version, and processes validation.
+    """
+    app = db.query(Application).filter(Application.id == id).first()
+    if not app:
+        raise HTTPException(status_code=404, detail="Application not found")
+        
+    return await _process_document_upload(db, app, doc_type, file)
+
+@router.delete("/{id}/documents/{doc_type}")
+def delete_document(
+    id: int,
+    doc_type: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Soft-delete document. Marks latest version status as RETRACTED.
+    """
+    app = db.query(Application).filter(Application.id == id).first()
+    if not app:
+        raise HTTPException(status_code=404, detail="Application not found")
+        
+    latest = db.query(Document).filter(
+        Document.application_id == id, Document.doc_type == doc_type, Document.is_latest == True
+    ).first()
+    
+    if not latest:
+        raise HTTPException(status_code=404, detail=f"No active document of type {doc_type} to delete")
+        
+    latest.status = "RETRACTED"
+    db.commit()
+    
+    # Update State Machine
+    app_state = app.states
+    if app_state:
+        state_data = dict(app_state.state_data)
+        if "documents_uploaded" in state_data and doc_type in state_data["documents_uploaded"]:
+            state_data["documents_uploaded"][doc_type] = "RETRACTED"
+            app_state.state_data = state_data
+            db.commit()
+            
+            # Log audit
+            audit = AuditLog(
+                actor="citizen",
+                action="DOCUMENT_RETRACTED",
+                application_id=app.id,
+                channel=app.channel,
+                result="SUCCESS",
+                metadata_json={"doc_type": doc_type, "version": latest.version}
+            )
+            db.add(audit)
+            db.commit()
+            
+    return {"message": f"Document {doc_type} successfully marked as RETRACTED"}
+
+@router.post("/{id}/documents/bulk-upload")
+async def bulk_upload_documents(
+    id: int,
+    db: Session = Depends(get_db),
+    identity_proof: UploadFile = File(None),
+    address_proof: UploadFile = File(None),
+    income_proof: UploadFile = File(None),
+    caste_proof: UploadFile = File(None)
+):
+    """
+    Accepts multiple documents, processes them, and tracks status.
+    Returns a bulk upload job ID.
+    """
+    app = db.query(Application).filter(Application.id == id).first()
+    if not app:
+        raise HTTPException(status_code=404, detail="Application not found")
+        
+    # Map uploaded files
+    uploaded_files = {}
+    if identity_proof:
+        uploaded_files["identity_proof"] = identity_proof
+    if address_proof:
+        uploaded_files["address_proof"] = address_proof
+    if income_proof:
+        uploaded_files["income_proof"] = income_proof
+    if caste_proof:
+        uploaded_files["caste_proof"] = caste_proof
+        
+    if not uploaded_files:
+        raise HTTPException(status_code=400, detail="No files uploaded in bulk request")
+        
+    # Generate bulk job entry
+    job_id = str(uuid.uuid4())
+    job = BulkUploadJob(
+        id=job_id,
+        application_id=id,
+        total_files=len(uploaded_files),
+        processed_files=0,
+        failed_files=0,
+        status="PROCESSING"
+    )
+    db.add(job)
+    db.commit()
+    
+    # Process files (synchronously for POC simplicity)
+    for doc_type, file in uploaded_files.items():
+        try:
+            res = await _process_document_upload(db, app, doc_type, file)
+            if res.get("status") == "VALIDATED":
+                job.processed_files += 1
+            else:
+                job.failed_files += 1
+        except Exception as e:
+            logger.error(f"Error processing {doc_type} in bulk job {job_id}: {e}")
+            job.failed_files += 1
+            
+    # Update job status
+    if job.failed_files == 0:
+        job.status = "COMPLETED"
+    elif job.processed_files == 0:
+        job.status = "FAILED"
+    else:
+        job.status = "PARTIAL_FAILURE"
+        
+    db.commit()
+    db.refresh(job)
+    
+    return {
+        "job_id": job.id,
+        "status": job.status,
+        "total": job.total_files,
+        "processed": job.processed_files,
+        "failed": job.failed_files
+    }
+
+@router.get("/{id}/documents/bulk-status/{job_id}", response_model=schemas.BulkUploadJobOut)
+def get_bulk_upload_status(
+    id: int,
+    job_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Polls the status of a bulk upload job.
+    """
+    job = db.query(BulkUploadJob).filter(BulkUploadJob.id == job_id, BulkUploadJob.application_id == id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Bulk upload job not found")
+    return job
+
+@router.get("/documents/{doc_id}/extraction", response_model=schemas.DocumentExtractionOut)
+def get_document_extraction(
+    doc_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Fetches the OCR extraction result for a given document version.
+    """
+    extraction = db.query(DocumentExtraction).filter(DocumentExtraction.document_id == doc_id).first()
+    if not extraction:
+        raise HTTPException(status_code=404, detail="No extraction record found for this document")
+    return extraction
 
 @router.post("/{id}/correction")
 def request_correction(

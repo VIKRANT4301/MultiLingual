@@ -14,7 +14,7 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 # Switch LLM Provider by Config (Section 6: Provider Abstraction)
-if settings.LLM_PROVIDER == "cloud":
+if settings.LLM_PROVIDER in ["cloud", "groq", "openrouter"]:
     llm_provider = CloudLLMProvider()
 else:
     llm_provider = LocalLLMProvider()
@@ -65,24 +65,44 @@ async def process_chat_message(
     db.add(user_msg)
     db.commit()
 
-    # 4. Invoke LLM Provider
-    result = await llm_provider.process_message(
-        text=text_input,
-        current_state=app_state.current_state,
-        collected_data=app_state.state_data,
-        preferred_language=app.language,
-        db=db,
-        session_id=session_id
-    )
-
-    # 5. Execute state transition based on LLM output/entities
-    new_state = StateMachineOrchestrator.process_state_transition(
-        db=db,
-        app_state=app_state,
-        app=app,
-        entities=result["entities"],
-        channel=channel
-    )
+    # 4. Invoke LLM Provider & Execute State Transition
+    if isinstance(llm_provider, LocalLLMProvider):
+        # Local regex flow: Transition the state machine BEFORE generating response text
+        # to ensure prompt text matches the newly active state
+        entities = llm_provider._extract_entities(text_input, app_state.current_state, app_state.state_data)
+        new_state = StateMachineOrchestrator.process_state_transition(
+            db=db,
+            app_state=app_state,
+            app=app,
+            entities=entities,
+            channel=channel
+        )
+        result = await llm_provider.process_message(
+            text=text_input,
+            current_state=new_state,
+            collected_data=app_state.state_data,
+            preferred_language=app.language,
+            db=db,
+            session_id=session_id
+        )
+        result["entities"] = entities
+    else:
+        # Cloud LLM: AI returns reply text and extracted entities in a single step
+        result = await llm_provider.process_message(
+            text=text_input,
+            current_state=app_state.current_state,
+            collected_data=app_state.state_data,
+            preferred_language=app.language,
+            db=db,
+            session_id=session_id
+        )
+        new_state = StateMachineOrchestrator.process_state_transition(
+            db=db,
+            app_state=app_state,
+            app=app,
+            entities=result["entities"],
+            channel=channel
+        )
 
     # Update app language if detected/changed
     if result.get("language") and result["language"] != app.language:
@@ -123,7 +143,8 @@ async def process_chat_message(
         missing_fields=missing_fields,
         application_id=app.id,
         is_blocked=result.get("is_blocked", False),
-        block_reason=result.get("block_reason")
+        block_reason=result.get("block_reason"),
+        redirect_to_service=app_state.state_data.get("redirect_to_service")
     )
 
 @router.post("/voice", response_model=schemas.MessageResponse)

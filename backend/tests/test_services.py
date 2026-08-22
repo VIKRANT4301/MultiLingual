@@ -19,7 +19,9 @@ def test_yaml_files_exist():
             data = yaml.safe_load(f)
             assert "id" in data, f"Missing 'id' in {filepath}"
             assert "name" in data, f"Missing 'name' in {filepath}"
-            assert "required_documents" in data, f"Missing 'required_documents' in {filepath}"
+            # Accept new format (required_document_groups) or old format (required_documents)
+            has_docs = "required_documents" in data or "required_document_groups" in data
+            assert has_docs, f"Missing 'required_documents' or 'required_document_groups' in {filepath}"
             assert "fee" in data, f"Missing 'fee' in {filepath}"
 
 def test_services_loaded_in_db():

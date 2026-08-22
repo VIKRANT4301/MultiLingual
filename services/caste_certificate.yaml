@@ -1,14 +1,80 @@
 id: caste_certificate
+version: "2026.08"
+
 name:
-  en: Caste Certificate
-  hi: जाति प्रमाण पत्र
-  mr: जात प्रमाणपत्र
-description: Certificate proving caste community classification.
+  en: "Caste Certificate"
+  hi: "जाति प्रमाण पत्र"
+  mr: "जात प्रमाणपत्र"
+
+description:
+  en: "Certificate proving caste community classification."
+  hi: "जाति समुदाय प्रमाण पत्र।"
+  mr: "जात समुदाय प्रमाणपत्र."
+
+issuing_authority:
+  primary: "Sub-Divisional Officer"
+  first_appeal: "Additional Collector"
+  second_appeal: "Collector"
+
+fee:
+  amount: 50.0
+  currency: "INR"
+
+processing_days: 21
+
 required_fields:
-  - full_name
-  - district
-required_documents:
-  - identity_proof
-  - caste_proof
-fee: 50.0
-processing_days: 10
+  - field: full_name
+    label_en: "Full Name (as on Aadhaar)"
+    label_hi: "पूरा नाम"
+    label_mr: "पूर्ण नाव"
+    required: true
+    type: text
+
+  - field: date_of_birth
+    label_en: "Date of Birth"
+    required: true
+    type: date
+
+  - field: father_name
+    label_en: "Father's Full Name"
+    label_hi: "पिता का नाम"
+    label_mr: "वडिलांचे नाव"
+    required: true
+    type: text
+
+  - field: district
+    label_en: "District"
+    required: true
+    type: text
+
+  - field: caste_name
+    label_en: "Caste Name"
+    required: true
+    type: text
+
+  - field: caste_category
+    label_en: "Caste Category"
+    required: true
+    type: choice
+    choices: [SC, ST, VJNT, OBC, SBC, EWS]
+
+  - field: certificate_purpose
+    label_en: "Purpose of Certificate"
+    required: true
+    type: text
+
+required_document_groups:
+  identity:
+    selection_rule: ANY_ONE
+    documents:
+      - aadhaar_card
+      - voter_id
+      - passport
+
+  caste_proof:
+    selection_rule: ANY_ONE
+    documents:
+      - school_leaving_certificate
+      - father_caste_certificate
+      - grandfather_caste_record
+      - magistrate_affidavit

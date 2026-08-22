@@ -1,16 +1,103 @@
 id: income_certificate
+version: "2026.08"
+
 name:
-  en: Income Certificate
-  hi: आय प्रमाण पत्र
-  mr: उत्पन्न प्रमाणपत्र
-description: Certificate proving annual family income.
+  en: "Income Certificate"
+  hi: "आय प्रमाण पत्र"
+  mr: "उत्पन्न दाखला"
+
+description:
+  en: "Certificate proving annual family income for scholarships, schemes and fee concessions."
+  hi: "वार्षिक पारिवारिक आय प्रमाण पत्र।"
+  mr: "वार्षिक कौटुंबिक उत्पन्नाचा दाखला."
+
+issuing_authority:
+  primary: "Nayab Tahsildar"
+  first_appeal: "Tahsildar"
+  second_appeal: "Sub-Divisional Officer"
+
+fee:
+  amount: 50.0
+  currency: "INR"
+
+processing_days: 15
+
 required_fields:
-  - full_name
-  - district
-  - annual_income
-required_documents:
-  - identity_proof
-  - address_proof
-  - income_proof
-fee: 50.0
-processing_days: 7
+  - field: full_name
+    label_en: "Full Name (as on Aadhaar)"
+    label_hi: "पूरा नाम"
+    label_mr: "पूर्ण नाव"
+    required: true
+    type: text
+
+  - field: date_of_birth
+    label_en: "Date of Birth"
+    label_hi: "जन्म तिथि"
+    label_mr: "जन्म तारीख"
+    required: true
+    type: date
+
+  - field: gender
+    label_en: "Gender"
+    required: true
+    type: choice
+    choices: [Male, Female, Other]
+
+  - field: mobile_number
+    label_en: "Mobile Number"
+    required: true
+    type: phone
+
+  - field: district
+    label_en: "District"
+    required: true
+    type: text
+
+  - field: annual_income
+    label_en: "Annual Family Income (₹)"
+    label_hi: "वार्षिक पारिवारिक आय"
+    label_mr: "वार्षिक कौटुंबिक उत्पन्न"
+    required: true
+    type: number
+
+  - field: income_source
+    label_en: "Primary Source of Income"
+    required: true
+    type: choice
+    choices: [Agriculture, Employment, Business, Pension, Daily Wages, Other]
+
+  - field: certificate_purpose
+    label_en: "Purpose of Certificate"
+    required: true
+    type: text
+
+required_document_groups:
+  identity:
+    selection_rule: ANY_ONE
+    documents:
+      - aadhaar_card
+      - voter_id
+      - pan_card
+      - passport
+      - driving_license
+
+  address:
+    selection_rule: ANY_ONE
+    documents:
+      - aadhaar_card
+      - voter_id
+      - electricity_bill
+      - water_bill
+      - ration_card
+
+  income_proof:
+    selection_rule: ANY_ONE
+    documents:
+      - form_16
+      - salary_slip
+      - employer_letter
+      - self_declaration_affidavit
+
+eligibility_rules:
+  - rule: resident_check
+    description: "Applicant must be a resident of Maharashtra."

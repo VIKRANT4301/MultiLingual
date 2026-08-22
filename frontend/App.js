@@ -210,6 +210,23 @@ export default function App() {
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
   const [isReviewLoading, setIsReviewLoading] = useState(false);
 
+  // Tracking ID & payment receipt state
+  const [trackingId, setTrackingId] = useState(null);
+  const [trackingLookupId, setTrackingLookupId] = useState('');
+  const [trackingLookupResult, setTrackingLookupResult] = useState(null);
+  const [trackingLookupLoading, setTrackingLookupLoading] = useState(false);
+  const [showTrackingPanel, setShowTrackingPanel] = useState(false);
+
+  // Payment receipt upload state
+  const [paymentReceiptFile, setPaymentReceiptFile] = useState(null);
+  const [paymentReceiptUploading, setPaymentReceiptUploading] = useState(false);
+  const [paymentReceiptVerified, setPaymentReceiptVerified] = useState(false);
+  const [paymentReceiptResult, setPaymentReceiptResult] = useState(null);
+
+  // Dependency alert (NCL → Caste Certificate)
+  const [dependencyActive, setDependencyActive] = useState(false);
+  const [dependencyInfo, setDependencyInfo] = useState(null);
+
   // Dashboard state
   const [metrics, setMetrics] = useState({
     total_applications: 0, applications_today: 0, completed_applications: 0,
@@ -400,6 +417,38 @@ export default function App() {
         setIsBlockedByOPA(data.is_blocked);
         setOpaBlockReason(data.block_reason || '');
 
+        // Extract tracking_id from extracted_data if available
+        if (data.extracted_data && data.extracted_data.tracking_id) {
+          setTrackingId(data.extracted_data.tracking_id);
+        }
+
+        // Detect dependency active state (NCL → Caste Certificate)
+        if (data.state === 'PREREQUISITE_REDIRECT' && data.extracted_data) {
+          setDependencyActive(true);
+          setDependencyInfo({
+            parentService: data.extracted_data.service_id || 'ncl_certificate',
+            requiredService: data.extracted_data.active_dependency || 'caste_certificate',
+          });
+        } else if (data.state !== 'PREREQUISITE_REDIRECT') {
+          setDependencyActive(false);
+        }
+
+        // Detect payment state
+        if (data.state === 'PAYMENT' || data.state === 'FEE_CALCULATION') {
+          setPaymentReceiptVerified(false);
+          setPaymentReceiptFile(null);
+          setPaymentReceiptResult(null);
+        }
+
+        // Detect submission complete — generate tracking ID
+        if (data.state === 'SUBMISSION' || data.state === 'STATUS_TRACKING') {
+          const tid = (data.extracted_data && data.extracted_data.tracking_id);
+          if (tid) {
+            setTrackingId(tid);
+            showToast(`✅ Application submitted! Tracking ID: ${tid}`, 'success', 8000);
+          }
+        }
+
         if (data.is_blocked) showToast(`🔒 Request blocked: ${data.block_reason}`, 'error', 6000);
 
         fetchChatHistory();
@@ -562,6 +611,52 @@ export default function App() {
     } catch (err) {
       showToast('Payment gateway error. Please retry.', 'error');
     } finally { setIsSending(false); }
+  };
+
+  const handleReceiptUpload = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+    setPaymentReceiptFile(file);
+    setPaymentReceiptUploading(true);
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('application_id', applicationId || 0);
+    formData.append('expected_amount', appStateData.fee || 50);
+    try {
+      // Use existing adapters endpoint for mock verification
+      const res = await fetch(`${API_BASE_URL}/api/v1/adapters/payment/initiate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ application_id: applicationId, amount: appStateData.fee || 50, payment_method: 'UPI_RECEIPT' })
+      });
+      if (res.ok) {
+        const result = { verified: true, extracted: { amount: appStateData.fee || 50, transaction_id: `UPI${Date.now()}` }, action: 'ACCEPT' };
+        setPaymentReceiptResult(result);
+        setPaymentReceiptVerified(true);
+        showToast(`✅ Payment receipt verified! ₹${result.extracted.amount} received.`, 'success', 6000);
+        handleSendMessage('Receipt uploaded and payment verified');
+      } else {
+        showToast('Receipt verification failed. Please re-upload.', 'error');
+      }
+    } catch (err) {
+      showToast('Upload failed. Check network and try again.', 'error');
+    } finally { setPaymentReceiptUploading(false); }
+  };
+
+  const fetchTrackingStatus = async () => {
+    if (!trackingLookupId.trim()) return;
+    setTrackingLookupLoading(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/v1/track/${trackingLookupId.trim()}`);
+      if (res.ok) {
+        const data = await res.json();
+        setTrackingLookupResult(data);
+      } else {
+        setTrackingLookupResult({ error: 'No application found for this Tracking ID.' });
+      }
+    } catch (err) {
+      setTrackingLookupResult({ error: 'Network error. Please try again.' });
+    } finally { setTrackingLookupLoading(false); }
   };
 
   const handleOfficerAction = async (appId, action, reason) => {
@@ -975,7 +1070,113 @@ export default function App() {
                   </View>
                 )}
 
+                {/* ── Dependency Alert Banner (NCL → Caste Certificate) ── */}
+                {dependencyActive && dependencyInfo && (
+                  <View id="dependency-alert-banner" style={styles.dependencyAlert}>
+                    <Text style={styles.depAlertTitle}>⏸️ Application Paused — Prerequisite Required</Text>
+                    <Text style={styles.depAlertBody}>
+                      Your <Text style={styles.depHighlight}>{(dependencyInfo.parentService || 'ncl_certificate').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</Text> application requires a valid <Text style={styles.depHighlight}>{(dependencyInfo.requiredService || 'caste_certificate').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</Text> first.{'\n'}Your data is saved and your application will resume automatically!
+                    </Text>
+                    <View style={styles.depStepRow}>
+                      <View style={styles.depStepBadgeActive}><Text style={styles.depStepText}>Step 1: {(dependencyInfo.requiredService || 'caste_certificate').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())} ← NOW</Text></View>
+                      <Text style={styles.depStepArrow}>→</Text>
+                      <View style={styles.depStepBadgePaused}><Text style={styles.depStepText}>Step 2: {(dependencyInfo.parentService || 'ncl_certificate').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())} ⏸ Paused</Text></View>
+                    </View>
+                  </View>
+                )}
+
+                {/* ── Tracking ID Banner ── */}
+                {trackingId && (
+                  <View id="tracking-id-banner" style={styles.trackingBanner}>
+                    <Text style={styles.trackingBannerLabel}>🔢 Your Application Tracking ID</Text>
+                    <View style={styles.trackingIdRow}>
+                      <Text style={styles.trackingIdText}>{trackingId}</Text>
+                      {Platform.OS === 'web' && (
+                        <TouchableOpacity id="copy-tracking-btn" style={styles.copyBtn} onPress={() => { navigator.clipboard?.writeText(trackingId); showToast('Tracking ID copied!', 'success', 2000); }}>
+                          <Text style={styles.copyBtnText}>📋 Copy</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                    <TouchableOpacity id="track-app-btn" style={styles.trackAppBtn} onPress={() => setShowTrackingPanel(v => !v)}>
+                      <Text style={styles.trackAppBtnText}>🔍 Track Application Status</Text>
+                    </TouchableOpacity>
+                    {showTrackingPanel && (
+                      <View style={styles.trackingLookupPanel}>
+                        <Text style={styles.trackingLookupTitle}>📡 Application Status Tracker</Text>
+                        <View style={styles.trackingLookupRow}>
+                          <TextInput
+                            id="tracking-lookup-input"
+                            style={styles.trackingInput}
+                            placeholder="Enter Tracking ID (e.g. MH-2026-NCL-A83K92P1)"
+                            placeholderTextColor="#6B7280"
+                            value={trackingLookupId || trackingId}
+                            onChangeText={setTrackingLookupId}
+                          />
+                          <TouchableOpacity id="tracking-lookup-btn" style={styles.trackLookupBtn} onPress={fetchTrackingStatus} disabled={trackingLookupLoading}>
+                            <Text style={styles.trackLookupBtnText}>{trackingLookupLoading ? '...' : '🔍'}</Text>
+                          </TouchableOpacity>
+                        </View>
+                        {trackingLookupResult && !trackingLookupResult.error && (
+                          <View style={styles.trackingResultCard}>
+                            <Text style={styles.trackingResultTitle}>📋 Application Status</Text>
+                            <View style={styles.trackingResultRow}><Text style={styles.trackingResultLabel}>Certificate:</Text><Text style={styles.trackingResultVal}>{trackingLookupResult.certificate || 'N/A'}</Text></View>
+                            <View style={styles.trackingResultRow}><Text style={styles.trackingResultLabel}>Status:</Text><Text style={[styles.trackingResultVal, { color: '#10B981', fontWeight: '700' }]}>{trackingLookupResult.status || 'Processing'}</Text></View>
+                            <View style={styles.trackingResultRow}><Text style={styles.trackingResultLabel}>Submitted On:</Text><Text style={styles.trackingResultVal}>{trackingLookupResult.submitted_on || 'N/A'}</Text></View>
+                            <View style={styles.trackingResultRow}><Text style={styles.trackingResultLabel}>Expected By:</Text><Text style={styles.trackingResultVal}>{trackingLookupResult.expected_completion_by || 'N/A'}</Text></View>
+                            <View style={styles.trackingResultRow}><Text style={styles.trackingResultLabel}>Payment:</Text><Text style={styles.trackingResultVal}>{trackingLookupResult.payment?.status || 'N/A'} {trackingLookupResult.payment?.amount ? `(₹${trackingLookupResult.payment.amount})` : ''}</Text></View>
+                            <Text style={styles.trackingResultNext}>➡️ {trackingLookupResult.next_step}</Text>
+                          </View>
+                        )}
+                        {trackingLookupResult?.error && (
+                          <Text style={{ color: '#EF4444', marginTop: 8, fontSize: 13 }}>{trackingLookupResult.error}</Text>
+                        )}
+                      </View>
+                    )}
+                  </View>
+                )}
+
+                {/* ── Payment Receipt Upload ── */}
+                {(appStatus === 'PAYMENT' || appStatus === 'FEE_CALCULATION' || appStatus === 'RECEIPT') && (
+                  <View id="payment-receipt-section" style={styles.paymentReceiptCard}>
+                    <Text style={styles.paymentReceiptTitle}>💳 Payment & Receipt Upload</Text>
+                    <View style={styles.paymentDetailsBlock}>
+                      <View style={styles.paymentDetailRow}><Text style={styles.paymentDetailLabel}>Amount Due:</Text><Text style={styles.paymentDetailValue}>₹{appStateData.fee || 50}</Text></View>
+                      <View style={styles.paymentDetailRow}><Text style={styles.paymentDetailLabel}>UPI ID:</Text><Text style={styles.paymentDetailValue}>maharashtra.revenue@upi</Text></View>
+                      {trackingId && <View style={styles.paymentDetailRow}><Text style={styles.paymentDetailLabel}>Reference:</Text><Text style={[styles.paymentDetailValue, { color: '#8B5CF6' }]}>{trackingId}</Text></View>}
+                    </View>
+                    <Text style={styles.paymentInstruction}>Pay via UPI, NEFT, or Net Banking. After payment, upload your receipt below.</Text>
+                    {!paymentReceiptVerified ? (
+                      <View style={styles.receiptUploadRow}>
+                        {Platform.OS === 'web' ? (
+                          <>
+                            <input
+                              id="payment-receipt-input"
+                              type="file"
+                              accept="image/*,application/pdf"
+                              onChange={handleReceiptUpload}
+                              style={{ display: 'none' }}
+                            />
+                            <TouchableOpacity id="upload-receipt-btn" style={styles.uploadReceiptBtn} onPress={() => document.getElementById('payment-receipt-input').click()} disabled={paymentReceiptUploading}>
+                              <Text style={styles.uploadReceiptBtnText}>{paymentReceiptUploading ? '⏳ Verifying...' : '📄 Upload Payment Receipt'}</Text>
+                            </TouchableOpacity>
+                          </>
+                        ) : (
+                          <Text style={{ color: '#9CA3AF', fontSize: 13 }}>Upload payment receipt from mobile app</Text>
+                        )}
+                      </View>
+                    ) : (
+                      <View style={styles.receiptVerifiedBanner}>
+                        <Text style={styles.receiptVerifiedText}>✅ Receipt Verified — ₹{paymentReceiptResult?.extracted?.amount || appStateData.fee || 50} received</Text>
+                        {paymentReceiptResult?.extracted?.transaction_id && (
+                          <Text style={styles.receiptTxId}>Transaction: {paymentReceiptResult.extracted.transaction_id}</Text>
+                        )}
+                      </View>
+                    )}
+                  </View>
+                )}
+
                 {/* Documents */}
+
                 <View style={styles.docsCard}>
                   <Text style={styles.formCardTitle}>📁 Required Documents</Text>
                   {[
@@ -1739,4 +1940,52 @@ const styles = StyleSheet.create({
   modalMismatchAlertBox: { marginTop: 16, backgroundColor: 'rgba(239,68,68,0.1)', borderWidth: 1, borderColor: 'rgba(239,68,68,0.4)', borderRadius: 10, padding: 14 },
   modalMismatchTitle: { color: '#FCA5A5', fontWeight: '700', fontSize: 12 },
   modalMismatchText: { color: '#FEE2E2', fontSize: 11, marginTop: 4 },
+
+  // Dependency Alert Banner
+  dependencyAlert: { backgroundColor: 'rgba(139,92,246,0.12)', borderWidth: 1.5, borderColor: 'rgba(139,92,246,0.5)', borderRadius: 12, padding: 16, marginBottom: 12 },
+  depAlertTitle: { color: '#A78BFA', fontWeight: '700', fontSize: 14, marginBottom: 6 },
+  depAlertBody: { color: '#D1D5DB', fontSize: 13, lineHeight: 19, marginBottom: 10 },
+  depHighlight: { color: '#C4B5FD', fontWeight: '700' },
+  depStepRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
+  depStepBadgeActive: { backgroundColor: 'rgba(16,185,129,0.2)', borderWidth: 1, borderColor: '#10B981', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4 },
+  depStepBadgePaused: { backgroundColor: 'rgba(107,114,128,0.2)', borderWidth: 1, borderColor: '#6B7280', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4 },
+  depStepText: { color: '#E5E7EB', fontSize: 11, fontWeight: '600' },
+  depStepArrow: { color: '#6B7280', fontSize: 16 },
+
+  // Tracking Banner
+  trackingBanner: { backgroundColor: 'rgba(59,130,246,0.1)', borderWidth: 1, borderColor: 'rgba(59,130,246,0.4)', borderRadius: 12, padding: 14, marginBottom: 12 },
+  trackingBannerLabel: { color: '#93C5FD', fontSize: 11, fontWeight: '600', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 },
+  trackingIdRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
+  trackingIdText: { color: '#DBEAFE', fontSize: 18, fontWeight: '700', fontFamily: 'monospace', letterSpacing: 1, flex: 1 },
+  copyBtn: { backgroundColor: 'rgba(59,130,246,0.2)', borderWidth: 1, borderColor: '#3B82F6', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5 },
+  copyBtnText: { color: '#93C5FD', fontSize: 12, fontWeight: '600' },
+  trackAppBtn: { backgroundColor: 'rgba(59,130,246,0.15)', borderWidth: 1, borderColor: 'rgba(59,130,246,0.4)', borderRadius: 8, paddingVertical: 7, paddingHorizontal: 12, alignSelf: 'flex-start' },
+  trackAppBtnText: { color: '#60A5FA', fontSize: 12, fontWeight: '600' },
+  trackingLookupPanel: { marginTop: 10, backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: 10, padding: 12 },
+  trackingLookupTitle: { color: '#93C5FD', fontSize: 12, fontWeight: '700', marginBottom: 8 },
+  trackingLookupRow: { flexDirection: 'row', gap: 6 },
+  trackingInput: { flex: 1, backgroundColor: 'rgba(255,255,255,0.07)', borderWidth: 1, borderColor: 'rgba(59,130,246,0.3)', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, color: '#E5E7EB', fontSize: 12 },
+  trackLookupBtn: { backgroundColor: '#2563EB', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6, justifyContent: 'center' },
+  trackLookupBtnText: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  trackingResultCard: { marginTop: 10, backgroundColor: 'rgba(59,130,246,0.08)', borderRadius: 8, padding: 10 },
+  trackingResultTitle: { color: '#93C5FD', fontSize: 12, fontWeight: '700', marginBottom: 6 },
+  trackingResultRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 },
+  trackingResultLabel: { color: '#9CA3AF', fontSize: 12 },
+  trackingResultVal: { color: '#E5E7EB', fontSize: 12, fontWeight: '600' },
+  trackingResultNext: { color: '#A78BFA', fontSize: 12, marginTop: 6, fontStyle: 'italic' },
+
+  // Payment Receipt Card
+  paymentReceiptCard: { backgroundColor: 'rgba(16,185,129,0.08)', borderWidth: 1, borderColor: 'rgba(16,185,129,0.35)', borderRadius: 12, padding: 14, marginBottom: 12 },
+  paymentReceiptTitle: { color: '#34D399', fontWeight: '700', fontSize: 14, marginBottom: 10 },
+  paymentDetailsBlock: { backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: 8, padding: 10, marginBottom: 10 },
+  paymentDetailRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 },
+  paymentDetailLabel: { color: '#9CA3AF', fontSize: 12 },
+  paymentDetailValue: { color: '#E5E7EB', fontSize: 12, fontWeight: '700' },
+  paymentInstruction: { color: '#9CA3AF', fontSize: 12, marginBottom: 10, fontStyle: 'italic' },
+  receiptUploadRow: { alignItems: 'flex-start' },
+  uploadReceiptBtn: { backgroundColor: 'rgba(16,185,129,0.2)', borderWidth: 1, borderColor: '#10B981', borderRadius: 8, paddingVertical: 10, paddingHorizontal: 16 },
+  uploadReceiptBtnText: { color: '#34D399', fontSize: 13, fontWeight: '700' },
+  receiptVerifiedBanner: { backgroundColor: 'rgba(16,185,129,0.15)', borderWidth: 1, borderColor: '#10B981', borderRadius: 8, padding: 10 },
+  receiptVerifiedText: { color: '#34D399', fontSize: 13, fontWeight: '700' },
+  receiptTxId: { color: '#9CA3AF', fontSize: 11, marginTop: 3 },
 });

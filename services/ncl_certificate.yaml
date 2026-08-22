@@ -1,0 +1,121 @@
+id: ncl_certificate
+version: "2026.08"
+
+name:
+  en: "Non-Creamy Layer Certificate (OBC NCL)"
+  hi: "नॉन क्रीमी लेयर प्रमाण पत्र"
+  mr: "उन्नत व प्रगत गटात न बसल्याचे प्रमाणपत्र"
+
+description:
+  en: "Certificate for OBC citizens proving annual family income does not exceed ₹8 Lakhs."
+  hi: "ओबीसी नागरिकों के लिए प्रमाण पत्र।"
+  mr: "ओबीसी नागरिकांसाठी प्रमाणपत्र."
+
+issuing_authority:
+  primary: "Sub-Divisional Officer"
+  first_appeal: "Additional Collector"
+  second_appeal: "Collector"
+
+fee:
+  amount: 50.0
+  currency: "INR"
+
+processing_days: 21
+
+dependency_rules:
+  required_prerequisites:
+    - certificate: caste_certificate
+      required: true
+      error_message:
+        en: "A valid Caste Certificate is required before applying for Non-Creamy Layer (NCL)."
+        hi: "NCL के लिए जाति प्रमाण पत्र आवश्यक है।"
+        mr: "NCL साठी जात प्रमाणपत्र आवश्यक आहे."
+      action_if_missing: PAUSE_AND_APPLY_DEPENDENCY
+
+eligibility_rules:
+  - rule: income_below_8_lakhs
+    description: "Annual family income must not exceed ₹8,00,000."
+    field: annual_income
+    condition: lte
+    value: 800000
+    error_message:
+      en: "Your annual income exceeds ₹8,00,000. You may not be eligible for Non-Creamy Layer certificate."
+      hi: "आपकी वार्षिक आय ₹8,00,000 से अधिक है।"
+      mr: "तुमचे वार्षिक उत्पन्न ₹8,00,000 पेक्षा जास्त आहे."
+
+required_fields:
+  - field: full_name
+    label_en: "Full Name (as on Aadhaar)"
+    label_hi: "पूरा नाम"
+    label_mr: "पूर्ण नाव"
+    required: true
+    type: text
+
+  - field: date_of_birth
+    label_en: "Date of Birth"
+    label_hi: "जन्म तिथि"
+    label_mr: "जन्म तारीख"
+    required: true
+    type: date
+
+  - field: gender
+    label_en: "Gender"
+    required: true
+    type: choice
+    choices: [Male, Female, Other]
+
+  - field: mobile_number
+    label_en: "Mobile Number"
+    required: true
+    type: phone
+
+  - field: district
+    label_en: "District"
+    required: true
+    type: text
+
+  - field: caste_name
+    label_en: "Caste Name"
+    label_hi: "जाति का नाम"
+    label_mr: "जातीचे नाव"
+    required: true
+    type: text
+
+  - field: caste_category
+    label_en: "Caste Category"
+    required: true
+    type: choice
+    choices: [OBC, VJNT, SBC, NT-A, NT-B, NT-C, NT-D]
+
+  - field: annual_income
+    label_en: "Annual Family Income (₹)"
+    label_hi: "वार्षिक आय (₹)"
+    label_mr: "वार्षिक उत्पन्न (₹)"
+    required: true
+    type: number
+
+  - field: certificate_purpose
+    label_en: "Purpose of Certificate"
+    required: true
+    type: text
+
+required_document_groups:
+  identity:
+    selection_rule: ANY_ONE
+    documents:
+      - aadhaar_card
+      - voter_id
+      - passport
+
+  caste_proof:
+    selection_rule: ALL
+    documents:
+      - caste_certificate
+
+  income_proof:
+    selection_rule: ANY_ONE
+    documents:
+      - income_certificate
+      - form_16
+      - salary_slip
+      - employer_letter

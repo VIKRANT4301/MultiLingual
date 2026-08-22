@@ -11,6 +11,11 @@ from backend.app.services.data_classification import DataClassificationService
 from backend.app.services.policy_engine import OPAPolicyEngine
 from backend.app.models.models import Service
 from backend.app.core.config import settings
+# New service integrations
+from backend.app.services.service_loader import ServiceLoader
+from backend.app.services.dependency_engine import DependencyEngine
+from backend.app.services.tracking_service import TrackingService
+from backend.app.services.notification_service import NotificationService
 
 logger = logging.getLogger(__name__)
 
@@ -257,14 +262,34 @@ class LocalLLMProvider(LLMProvider):
                     response_text = loc.get("ask_consent", "")
             elif current_state in ["DOCUMENT_COLLECTION", "DOCUMENT_VALIDATION"]:
                 uploaded_docs = collected_data.get("documents_uploaded", {})
-                validated_list = [d.replace("_", " ").title() for d, st in uploaded_docs.items() if st in ["VALIDATED", "SUCCESS"]]
-                
-                service = None
-                if db and collected_data.get("service_id"):
-                    service = db.query(Service).filter(Service.id == collected_data["service_id"]).first()
-                
-                req_docs = service.required_documents if service else ["identity_proof", "address_proof", "income_proof"]
-                missing_docs = [d.replace("_", " ").title() for d in req_docs if uploaded_docs.get(d) not in ["VALIDATED", "SUCCESS"]]
+                service_id = collected_data.get("service_id", "obc_ncl_certificate")
+
+                # Use ServiceLoader for dynamic doc groups
+                doc_groups = ServiceLoader.get_required_documents(service_id)
+                if doc_groups:
+                    missing_groups = []
+                    validated_groups = []
+                    for group_name, group_cfg in doc_groups.items():
+                        if uploaded_docs.get(group_name) in ["VALIDATED", "SUCCESS"]:
+                            validated_groups.append(group_name.replace("_", " ").title())
+                        else:
+                            # Any doc from group uploaded?
+                            group_docs = group_cfg.get("documents", [])
+                            any_uploaded = any(uploaded_docs.get(d) in ["VALIDATED", "SUCCESS"] for d in group_docs)
+                            if not any_uploaded:
+                                missing_groups.append(group_name.replace("_", " ").title())
+                            else:
+                                validated_groups.append(group_name.replace("_", " ").title())
+                    missing_docs = missing_groups
+                    validated_list = validated_groups
+                else:
+                    # Fallback to old DB-based approach
+                    service = None
+                    if db and collected_data.get("service_id"):
+                        service = db.query(Service).filter(Service.id == collected_data["service_id"]).first()
+                    req_docs = service.required_documents if service else ["identity_proof", "address_proof", "income_proof"]
+                    validated_list = [d.replace("_", " ").title() for d, st in uploaded_docs.items() if st in ["VALIDATED", "SUCCESS"]]
+                    missing_docs = [d.replace("_", " ").title() for d in req_docs if uploaded_docs.get(d) not in ["VALIDATED", "SUCCESS"]]
                 
                 validation_errors = collected_data.get("document_validation_errors", {})
                 if validation_errors:
@@ -297,7 +322,17 @@ class LocalLLMProvider(LLMProvider):
             elif current_state == "PREREQUISITE_PROMPT":
                 response_text = loc.get("prerequisite_prompt", "")
             elif current_state == "PREREQUISITE_REDIRECT":
-                response_text = loc.get("prerequisite_redirect", "")
+                # Dynamic dependency message via NotificationService templates
+                service_id = collected_data.get("service_id", "ncl_certificate")
+                dep_cert = collected_data.get("active_dependency", "caste_certificate")
+                service_data = ServiceLoader.load_service(service_id)
+                cert_name = service_data.get("name", {}).get(lang, service_data.get("name", {}).get("en", service_id.replace("_", " ").title()))
+                dep_data = ServiceLoader.load_service(dep_cert)
+                dep_cert_name = dep_data.get("name", {}).get(lang, dep_data.get("name", {}).get("en", dep_cert.replace("_", " ").title()))
+                response_text = NotificationService.format_message(
+                    "DEPENDENCY_REQUIRED", lang,
+                    {"cert_name": cert_name, "dep_cert": dep_cert_name, "tracking_id": collected_data.get("tracking_id", "")}
+                )
             elif current_state == "NESTED_INCOME_FLOW":
                 # Responding in prerequisite loop success
                 app_no = f"INC-2026-{random.randint(1000,9999)}"
@@ -307,22 +342,39 @@ class LocalLLMProvider(LLMProvider):
             elif current_state == "AUTHENTICATION":
                 response_text = loc.get("ask_auth", "")
             elif current_state == "FEE_CALCULATION" or current_state == "PAYMENT":
-                response_text = loc.get("ask_payment", "")
+                service_id = collected_data.get("service_id", "obc_ncl_certificate")
+                fee = ServiceLoader.get_fee(service_id)
+                service_data = ServiceLoader.load_service(service_id)
+                cert_name = service_data.get("name", {}).get(lang, service_data.get("name", {}).get("en", ""))
+                tracking_id = collected_data.get("tracking_id", "N/A")
+                response_text = NotificationService.format_message(
+                    "PAYMENT_REQUIRED", lang,
+                    {"cert_name": cert_name, "amount": f"{fee:.0f}", "upi_id": "maharashtra.revenue@upi", "tracking_id": tracking_id}
+                )
             elif current_state == "SUBMISSION":
-                app_no = collected_data.get("application_no", "NCL-2026-1026")
-                response_text = loc.get("application_submitted", "").format(app_no=app_no)
+                service_id = collected_data.get("service_id", "obc_ncl_certificate")
+                # Generate tracking ID if not already present
+                tracking_id = collected_data.get("tracking_id")
+                if not tracking_id:
+                    tracking_id = TrackingService.generate_tracking_id(service_id)
+                processing_days = ServiceLoader.get_processing_days(service_id)
+                service_data = ServiceLoader.load_service(service_id)
+                cert_name = service_data.get("name", {}).get(lang, service_data.get("name", {}).get("en", ""))
+                response_text = NotificationService.format_message(
+                    "APPLICATION_SUBMITTED", lang,
+                    {"cert_name": cert_name, "tracking_id": tracking_id, "days": processing_days}
+                )
             elif current_state == "CERTIFICATE_GENERATION":
-                service = None
-                if db and collected_data.get("service_id"):
-                    service = db.query(Service).filter(Service.id == collected_data["service_id"]).first()
-                service_name = service.name if service else collected_data.get("service_id", "").replace("_", " ").title()
-                
-                if lang == "hi":
-                    response_text = f"बधाई हो! आपका {service_name} तैयार है। अब आप इसे डाउनलोड कर सकते हैं।"
-                elif lang == "mr":
-                    response_text = f"अभिनंदन! तुमचे {service_name} तयार आहे. तुम्ही आता ते डाउनलोड करू शकता।"
-                else:
-                    response_text = f"Congratulations! Your {service_name} is ready. You can now download it."
+                service_id = collected_data.get("service_id", "obc_ncl_certificate")
+                service_data = ServiceLoader.load_service(service_id)
+                cert_name = service_data.get("name", {}).get(lang, service_data.get("name", {}).get("en", ""))
+                tracking_id = collected_data.get("tracking_id", "N/A")
+                # Auto-generate certificate if not already generated
+                cert_url = collected_data.get("certificate_url", f"/static/certificates/{service_id}_preview.html")
+                response_text = NotificationService.format_message(
+                    "CERTIFICATE_ISSUED", lang,
+                    {"cert_name": cert_name, "cert_no": collected_data.get("cert_no", "N/A"), "tracking_id": tracking_id, "download_link": cert_url}
+                )
             else:
                 response_text = loc.get("general_error", "")
 

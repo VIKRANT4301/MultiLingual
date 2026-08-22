@@ -18,7 +18,8 @@ from backend.app.api.endpoints import (
     conversation as conversation_router,
     applications as applications_router,
     adapters as adapters_router,
-    dashboard as dashboard_router
+    dashboard as dashboard_router,
+    tracking as tracking_router
 )
 
 # Configure logging
@@ -62,6 +63,7 @@ app.include_router(conversation_router.router, prefix=f"{settings.API_V1_STR}/co
 app.include_router(applications_router.router, prefix=f"{settings.API_V1_STR}/applications", tags=["Applications"])
 app.include_router(adapters_router.router, prefix=f"{settings.API_V1_STR}/adapters", tags=["Adapters"])
 app.include_router(dashboard_router.router, prefix=f"{settings.API_V1_STR}/dashboard", tags=["Dashboard"])
+app.include_router(tracking_router.router, prefix=f"{settings.API_V1_STR}/track", tags=["Tracking"])
 
 @app.get("/health")
 def health_check():

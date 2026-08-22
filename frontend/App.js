@@ -532,7 +532,15 @@ export default function App() {
       const docsRes = await fetch(`${API_BASE_URL}/api/v1/applications/${applicationId}/documents`);
       if (docsRes.ok) {
         const docs = await docsRes.json();
-        const matchDoc = docs.find(d => d.doc_type === docType);
+        const baseType = docType.replace('_proof', '');
+        const matchDoc = docs.find(d => 
+          d.doc_type === docType || 
+          d.doc_type === baseType || 
+          d.doc_type === `${baseType}_proof` ||
+          docType.includes(d.doc_type) ||
+          d.doc_type.includes(baseType)
+        ) || docs[0]; // Fallback to latest document if specific type match is lenient
+
         if (matchDoc) {
           const prevRes = await fetch(`${API_BASE_URL}/api/v1/applications/documents/${matchDoc.id}/preview`);
           if (prevRes.ok) {
@@ -1185,8 +1193,11 @@ export default function App() {
                     { type: 'caste_proof',    label: 'Caste Proof',    sub: 'Community / School Leaving Certificate' },
                     { type: 'income_proof',   label: 'Income Proof',   sub: 'Form 16 / Salary Slip', disabled: appStateData.lacks_income_proof },
                   ].map(doc => {
-                    const status = appStateData.documents_uploaded?.[doc.type];
-                    const isValidated = status?.includes('VALIDATED');
+                    const baseType = doc.type.replace('_proof', '');
+                    const status = appStateData.documents_uploaded?.[doc.type] ||
+                                   appStateData.documents_uploaded?.[baseType] ||
+                                   appStateData.documents_uploaded?.[`${baseType}_proof`];
+                    const isValidated = status?.includes('VALIDATED') || status?.includes('SUCCESS');
                     const isFailed = status?.includes('FAILED') || status?.includes('MISMATCH');
                     return (
                       <View key={doc.type} style={[styles.docRow, isValidated && styles.docRowValidated, isFailed && styles.docRowFailed]}>
@@ -1197,11 +1208,11 @@ export default function App() {
                           <Text style={styles.docLabel}>{doc.label}</Text>
                           <Text style={styles.docSub}>{doc.sub}</Text>
                           {status && (
-                            <Text style={[styles.docStatus, getDocStatusStyle(status)]}>{status}</Text>
+                            <Text style={[styles.docStatus, isValidated ? { color: '#10B981', backgroundColor: 'rgba(16,185,129,0.15)' } : isFailed ? { color: '#EF4444', backgroundColor: 'rgba(239,68,68,0.15)' } : { color: '#F59E0B', backgroundColor: 'rgba(245,158,11,0.15)' }]}>{status}</Text>
                           )}
                         </View>
                         <View style={[styles.docUploadArea, { flexDirection: 'row', alignItems: 'center', gap: 6 }]}>
-                          {status && (
+                          {(status || isValidated) && (
                             <TouchableOpacity 
                               style={styles.reviewBtn}
                               onPress={() => handleReviewDocument(doc.type)}

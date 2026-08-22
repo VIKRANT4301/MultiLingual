@@ -1,0 +1,15 @@
+id: domicile_certificate
+name:
+  en: Domicile Certificate
+  hi: अधिवास प्रमाण पत्र
+  mr: अधिवास प्रमाणपत्र
+description: Certificate proving residency in the state for 15+ years.
+required_fields:
+  - full_name
+  - district
+required_documents:
+  - identity_proof
+  - address_proof
+  - residency_proof
+fee: 50.0
+processing_days: 15

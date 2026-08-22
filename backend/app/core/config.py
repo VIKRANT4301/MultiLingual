@@ -34,5 +34,6 @@ class Settings:
     WHATSAPP_PHONE_NUMBER_ID: str = os.getenv("WHATSAPP_PHONE_NUMBER_ID", "")
     
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
+    POC_MODE: bool = os.getenv("POC_MODE", "true").lower() == "true"
 
 settings = Settings()

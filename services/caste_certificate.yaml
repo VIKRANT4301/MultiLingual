@@ -1,0 +1,14 @@
+id: caste_certificate
+name:
+  en: Caste Certificate
+  hi: जाति प्रमाण पत्र
+  mr: जात प्रमाणपत्र
+description: Certificate proving caste community classification.
+required_fields:
+  - full_name
+  - district
+required_documents:
+  - identity_proof
+  - caste_proof
+fee: 50.0
+processing_days: 10

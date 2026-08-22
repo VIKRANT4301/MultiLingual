@@ -9,7 +9,8 @@ from backend.app.core.database import get_db
 from backend.app.security.auth import get_current_user, RoleChecker
 from backend.app.models.models import (
     Application, Document, DocumentExtraction, AuditLog, 
-    Escalation, Certificate, User, Citizen, BulkUploadJob
+    Escalation, Certificate, User, Citizen, BulkUploadJob,
+    Service
 )
 import uuid
 from backend.app.schemas import schemas
@@ -43,6 +44,13 @@ def list_applications(
         if not citizen:
             return []
         return db.query(Application).filter(Application.citizen_id == citizen.id).all()
+
+@router.get("/services/list", response_model=List[schemas.ServiceOut])
+def list_services(db: Session = Depends(get_db)):
+    """
+    Returns a list of all available services (Section 21/25).
+    """
+    return db.query(Service).all()
 
 @router.get("/{id}", response_model=schemas.ApplicationOut)
 def get_application(

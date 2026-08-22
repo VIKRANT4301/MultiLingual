@@ -326,21 +326,36 @@ class StateMachineOrchestrator:
             
         # 3. State: SERVICE_SELECTION
         elif current == "SERVICE_SELECTION":
-            if entities.get("intent") in ["OBC_NCL_CERTIFICATE", "INCOME_CERTIFICATE"] or "ncl" in str(entities).lower():
-                # Allow dynamic service switching
-                if "income" in str(entities).lower() and "ncl" not in str(entities).lower():
+            user_text = (entities.get("user_text") or "").lower()
+            
+            # Check if user selected a service dynamically by matching text
+            all_services = db.query(Service).all()
+            matched_service = None
+            
+            for s in all_services:
+                if s.id.lower() in user_text or s.name.lower() in user_text:
+                    matched_service = s
+                    break
+            
+            if matched_service:
+                app.service_id = matched_service.id
+                state_data["service_id"] = app.service_id
+                db.commit()
+            elif entities.get("intent") in ["OBC_NCL_CERTIFICATE", "INCOME_CERTIFICATE"] or "ncl" in user_text:
+                if "income" in user_text and "ncl" not in user_text:
                     app.service_id = "income_certificate"
                 else:
                     app.service_id = "obc_ncl_certificate"
                 state_data["service_id"] = app.service_id
                 db.commit()
+                
             app_state.current_state = "INFORMATION_COLLECTION"
 
         # 4. State: INFORMATION_COLLECTION
         elif current == "INFORMATION_COLLECTION":
             # Check if name and district are present (income is checked dynamically depending on service)
             if state_data.get("full_name") and state_data.get("district"):
-                if app.service_id == "obc_ncl_certificate" and state_data.get("annual_income") is None:
+                if "income_proof" in required_docs and state_data.get("annual_income") is None:
                     # Let the LLM ask for income or documents next
                     pass
                 else:

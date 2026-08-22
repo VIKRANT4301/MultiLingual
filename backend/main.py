@@ -1,4 +1,6 @@
 import os
+import yaml
+import glob
 import logging
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -287,6 +289,50 @@ def seed_database():
                 "processing_days": 3
             }
         ]
+
+        # Load from YAML and override default services if specified
+        services_dir = "services"
+        if not os.path.exists(services_dir):
+            services_dir = os.path.join(os.path.dirname(__file__), "..", "services")
+            if not os.path.exists(services_dir):
+                services_dir = os.path.join(os.path.dirname(__file__), "services")
+
+        loaded_yaml_services = {}
+        if os.path.exists(services_dir):
+            for filepath in glob.glob(os.path.join(services_dir, "*.yaml")) + glob.glob(os.path.join(services_dir, "*.yml")):
+                try:
+                    with open(filepath, "r", encoding="utf-8") as f:
+                        data = yaml.safe_load(f)
+                        if data and "id" in data:
+                            loaded_yaml_services[data["id"]] = data
+                except Exception as ex:
+                    logger.error(f"Error loading YAML service from {filepath}: {ex}")
+
+        # Merge YAML services into the default services list
+        for s_item in services:
+            s_id = s_item["id"]
+            if s_id in loaded_yaml_services:
+                ys = loaded_yaml_services[s_id]
+                svc_name = ys.get("name", {}).get("en") if isinstance(ys.get("name"), dict) else ys.get("name")
+                s_item["name"] = svc_name or s_item["name"]
+                s_item["description"] = ys.get("description", s_item["description"])
+                s_item["required_documents"] = ys.get("required_documents", s_item["required_documents"])
+                s_item["fee"] = float(ys.get("fee", s_item["fee"]))
+                s_item["processing_days"] = int(ys.get("processing_days", s_item["processing_days"]))
+
+        # Add any extra services defined in YAML but not in defaults
+        default_ids = {s["id"] for s in services}
+        for s_id, ys in loaded_yaml_services.items():
+            if s_id not in default_ids:
+                svc_name = ys.get("name", {}).get("en") if isinstance(ys.get("name"), dict) else ys.get("name")
+                services.append({
+                    "id": s_id,
+                    "name": svc_name or s_id.replace("_", " ").title(),
+                    "description": ys.get("description", ""),
+                    "required_documents": ys.get("required_documents", ["identity_proof", "address_proof"]),
+                    "fee": float(ys.get("fee", 50.0)),
+                    "processing_days": int(ys.get("processing_days", 7))
+                })
 
         for s_data in services:
             existing = db.query(models.Service).filter(models.Service.id == s_data["id"]).first()

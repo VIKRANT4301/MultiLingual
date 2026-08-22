@@ -12,3 +12,4 @@ python-dotenv>=1.0.1
 scikit-learn>=1.0.0
 lightgbm>=4.0.0
 numpy>=1.20.0
+PyYAML>=6.0.0

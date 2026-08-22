@@ -202,6 +202,8 @@ export default function App() {
   const [isBlockedByOPA, setIsBlockedByOPA] = useState(false);
   const [opaBlockReason, setOpaBlockReason] = useState('');
   const [preferredLang, setPreferredLang] = useState('en');
+  const [servicesList, setServicesList] = useState([]);
+  const [selectedServiceId, setSelectedServiceId] = useState('');
 
   // Dashboard state
   const [metrics, setMetrics] = useState({
@@ -231,6 +233,7 @@ export default function App() {
   // ── Dashboard polling ──────────────────────
   useEffect(() => {
     fetchDashboardData();
+    fetchServices();
     const interval = setInterval(fetchDashboardData, 5000);
     return () => clearInterval(interval);
   }, []);
@@ -284,6 +287,52 @@ export default function App() {
       console.log('Dashboard fetch error:', err);
     }
   };
+
+  const fetchServices = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/v1/applications/services/list`);
+      if (res.ok) {
+        setServicesList(await res.json());
+      }
+    } catch (err) {
+      console.log('Error fetching services:', err);
+    }
+  };
+
+  const handleSelectService = (serviceId) => {
+    setSelectedServiceId(serviceId);
+    if (!serviceId) return;
+    
+    const selectedSvc = servicesList.find(s => s.id === serviceId);
+    if (!selectedSvc) return;
+
+    // Reset flow first
+    const newSid = `session-${Math.floor(100000 + Math.random() * 900000)}`;
+    setSessionId(newSid);
+    setChatHistory([]);
+    setAppStateData({});
+    setAppStatus('START');
+    setApplicationId(null);
+    setMissingFields([]);
+    setIsBlockedByOPA(false);
+    setOpaBlockReason('');
+    
+    showToast(`Starting application for ${selectedSvc.name}`, 'info');
+
+    // Automatically send the message to initiate the service!
+    if (Platform.OS === 'web' && 'speechSynthesis' in window) window.speechSynthesis.cancel();
+    setTimeout(() => {
+      handleSendMessage(`I want to apply for ${selectedSvc.name}`, newSid);
+    }, 300);
+  };
+
+  useEffect(() => {
+    if (appStateData.service_id) {
+      setSelectedServiceId(appStateData.service_id);
+    } else {
+      setSelectedServiceId('');
+    }
+  }, [appStateData.service_id]);
 
   const speakText = (text) => {
     if (Platform.OS === 'web' && 'speechSynthesis' in window) {
@@ -582,6 +631,31 @@ export default function App() {
           </View>
         </View>
         <View style={styles.headerRight}>
+          <select
+            id="service-selector"
+            value={selectedServiceId}
+            onChange={(e) => handleSelectService(e.target.value)}
+            style={{
+              backgroundColor: 'rgba(59,130,246,0.08)',
+              color: '#3B82F6',
+              borderColor: 'rgba(59,130,246,0.2)',
+              borderWidth: 1,
+              borderRadius: 20,
+              paddingVertical: 5,
+              paddingHorizontal: 12,
+              fontSize: 12,
+              fontWeight: '600',
+              cursor: 'pointer',
+              outline: 'none',
+              marginRight: 8,
+            }}
+          >
+            <option value="" style={{ backgroundColor: '#141E33', color: '#64748B' }}>-- Select Government Service (25 Available) --</option>
+            {servicesList.map(s => (
+              <option key={s.id} value={s.id} style={{ backgroundColor: '#141E33', color: '#E2E8F0' }}>{s.name}</option>
+            ))}
+          </select>
+
           <View style={styles.sessionChip}>
             <Text style={styles.sessionChipDot}>●</Text>
             <Text style={styles.sessionChipText}>{sessionId.split('-').slice(-1)[0]}</Text>

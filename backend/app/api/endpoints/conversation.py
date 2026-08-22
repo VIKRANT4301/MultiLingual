@@ -70,6 +70,7 @@ async def process_chat_message(
         # Local regex flow: Transition the state machine BEFORE generating response text
         # to ensure prompt text matches the newly active state
         entities = llm_provider._extract_entities(text_input, app_state.current_state, app_state.state_data)
+        entities["user_text"] = text_input
         new_state = StateMachineOrchestrator.process_state_transition(
             db=db,
             app_state=app_state,
@@ -96,6 +97,9 @@ async def process_chat_message(
             db=db,
             session_id=session_id
         )
+        if "entities" not in result or result["entities"] is None:
+            result["entities"] = {}
+        result["entities"]["user_text"] = text_input
         new_state = StateMachineOrchestrator.process_state_transition(
             db=db,
             app_state=app_state,

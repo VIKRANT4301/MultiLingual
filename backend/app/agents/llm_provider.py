@@ -9,6 +9,7 @@ from typing import Dict, Any, List, Tuple, Optional
 from sqlalchemy.orm import Session
 from backend.app.services.data_classification import DataClassificationService
 from backend.app.services.policy_engine import OPAPolicyEngine
+from backend.app.models.models import Service
 from backend.app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -133,7 +134,7 @@ class LocalLLMProvider(LLMProvider):
 
         # 5. Extract District
         for district in self.DISTRICTS:
-            if district in text_lower:
+            if re.search(r"\b" + re.escape(district) + r"\b", text_lower):
                 entities["district"] = district.capitalize()
                 break
 
@@ -145,7 +146,7 @@ class LocalLLMProvider(LLMProvider):
             elif collected_data and collected_data.get("full_name"):
                 # If name already collected, do not overwrite it with fallback district words
                 pass
-            elif len(text.split()) <= 4 and not any(char.isdigit() for char in text) and "income" not in text_lower and "district" not in text_lower and "ncl" not in text_lower:
+            elif len(text.split()) <= 4 and not any(char.isdigit() for char in text) and "income" not in text_lower and "district" not in text_lower and "ncl" not in text_lower and text_lower.strip() not in self.DISTRICTS:
                 entities["full_name"] = text.strip()
 
         # 7. Check if user states they lack income proof (Self-Recovering loop trigger)
@@ -225,11 +226,28 @@ class LocalLLMProvider(LLMProvider):
                 district = collected_data.get("district") or entities.get("district")
                 income = collected_data.get("annual_income") or entities.get("annual_income")
                 
+                service = None
+                if db and collected_data.get("service_id"):
+                    service = db.query(Service).filter(Service.id == collected_data["service_id"]).first()
+                
+                service_requires_income = False
+                if service:
+                    service_requires_income = "income_proof" in service.required_documents
+                else:
+                    service_requires_income = collected_data.get("service_id") in ["obc_ncl_certificate", "income_certificate", "ews_certificate"]
+
+                service_name = service.name if service else collected_data.get("service_id", "").replace("_", " ").title()
+
                 if not name:
-                    response_text = loc.get("welcome_ncl" if collected_data.get("service_id") == "obc_ncl_certificate" else "welcome_income", "")
+                    if lang == "hi":
+                        response_text = f"ज़रूर! मैं आपका {service_name} आवेदन शुरू करता हूँ। सबसे पहले, कृपया मुझे अपना पूरा नाम बताएं।"
+                    elif lang == "mr":
+                        response_text = f"नक्कीच! मी तुमचा {service_name} अर्ज सुरू करतो. कृपया तुमचे पूर्ण नाव सांगा।"
+                    else:
+                        response_text = f"Certainly! I will start your {service_name} application. First, please tell me your full name."
                 elif not district:
                     response_text = loc.get("ask_district", "")
-                elif income is None and collected_data.get("service_id") == "obc_ncl_certificate":
+                elif income is None and service_requires_income:
                     response_text = loc.get("ask_income", "")
                 else:
                     response_text = loc.get("ask_consent", "")
@@ -239,7 +257,25 @@ class LocalLLMProvider(LLMProvider):
                     err_details = "\n".join([f"- {doc.replace('_', ' ').title()}: {err}" for doc, err in validation_errors.items()])
                     response_text = loc.get("ask_documents_mismatch", "").format(mismatch_details=err_details)
                 else:
-                    response_text = loc.get("ask_documents", "")
+                    service = None
+                    if db and collected_data.get("service_id"):
+                        service = db.query(Service).filter(Service.id == collected_data["service_id"]).first()
+                    
+                    if service:
+                        doc_names = [d.replace("_", " ").title() for d in service.required_documents]
+                        if len(doc_names) > 1:
+                            doc_str = ", ".join(doc_names[:-1]) + " and " + doc_names[-1]
+                        else:
+                            doc_str = doc_names[0] if doc_names else "Required Documents"
+                    else:
+                        doc_str = "Identity Proof, Address Proof, and Income Proof"
+                        
+                    if lang == "hi":
+                        response_text = f"आपका विवरण दर्ज कर लिया गया है। कृपया आवश्यक दस्तावेज अपलोड करें: {doc_str}।"
+                    elif lang == "mr":
+                        response_text = f"तुमची प्राथमिक माहिती नोंदवली गेली आहे. कृपया आवश्यक कागदपत्रे अपलोड करा: {doc_str}."
+                    else:
+                        response_text = f"Your basic details are captured. Please upload the required documents: {doc_str}."
             elif current_state == "PREREQUISITE_PROMPT":
                 response_text = loc.get("prerequisite_prompt", "")
             elif current_state == "PREREQUISITE_REDIRECT":
@@ -258,7 +294,17 @@ class LocalLLMProvider(LLMProvider):
                 app_no = collected_data.get("application_no", "NCL-2026-1026")
                 response_text = loc.get("application_submitted", "").format(app_no=app_no)
             elif current_state == "CERTIFICATE_GENERATION":
-                response_text = loc.get("ncl_completed" if collected_data.get("service_id") == "obc_ncl_certificate" else "certificate_ready", "")
+                service = None
+                if db and collected_data.get("service_id"):
+                    service = db.query(Service).filter(Service.id == collected_data["service_id"]).first()
+                service_name = service.name if service else collected_data.get("service_id", "").replace("_", " ").title()
+                
+                if lang == "hi":
+                    response_text = f"बधाई हो! आपका {service_name} तैयार है। अब आप इसे डाउनलोड कर सकते हैं।"
+                elif lang == "mr":
+                    response_text = f"अभिनंदन! तुमचे {service_name} तयार आहे. तुम्ही आता ते डाउनलोड करू शकता।"
+                else:
+                    response_text = f"Congratulations! Your {service_name} is ready. You can now download it."
             else:
                 response_text = loc.get("general_error", "")
 

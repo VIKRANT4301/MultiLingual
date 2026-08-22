@@ -1,0 +1,15 @@
+id: solvency_certificate
+name:
+  en: Solvency Certificate
+  hi: शोधक्षमता प्रमाण पत्र
+  mr: आर्थिक सक्षमता प्रमाणपत्र
+description: Certificate proving financial creditworthiness.
+required_fields:
+  - full_name
+  - district
+required_documents:
+  - identity_proof
+  - bank_statement
+  - asset_proof
+fee: 100.0
+processing_days: 21

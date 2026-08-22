@@ -1,0 +1,16 @@
+id: income_certificate
+name:
+  en: Income Certificate
+  hi: आय प्रमाण पत्र
+  mr: उत्पन्न प्रमाणपत्र
+description: Certificate proving annual family income.
+required_fields:
+  - full_name
+  - district
+  - annual_income
+required_documents:
+  - identity_proof
+  - address_proof
+  - income_proof
+fee: 50.0
+processing_days: 7

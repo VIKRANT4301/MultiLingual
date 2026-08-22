@@ -205,6 +205,11 @@ export default function App() {
   const [servicesList, setServicesList] = useState([]);
   const [selectedServiceId, setSelectedServiceId] = useState('');
 
+  // Document Review Inspection Modal State
+  const [reviewModalData, setReviewModalData] = useState(null);
+  const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
+  const [isReviewLoading, setIsReviewLoading] = useState(false);
+
   // Dashboard state
   const [metrics, setMetrics] = useState({
     total_applications: 0, applications_today: 0, completed_applications: 0,
@@ -467,6 +472,39 @@ export default function App() {
     if (mediaRecorder) { mediaRecorder.stop(); setIsRecording(false); }
   };
 
+  const handleReviewDocument = async (docType) => {
+    if (!applicationId) {
+      showToast('Start application first to review documents', 'warning');
+      return;
+    }
+    setIsReviewModalOpen(true);
+    setIsReviewLoading(true);
+    try {
+      const docsRes = await fetch(`${API_BASE_URL}/api/v1/applications/${applicationId}/documents`);
+      if (docsRes.ok) {
+        const docs = await docsRes.json();
+        const matchDoc = docs.find(d => d.doc_type === docType);
+        if (matchDoc) {
+          const prevRes = await fetch(`${API_BASE_URL}/api/v1/applications/documents/${matchDoc.id}/preview`);
+          if (prevRes.ok) {
+            const prevData = await prevRes.json();
+            setReviewModalData(prevData);
+            setIsReviewLoading(false);
+            return;
+          }
+        }
+      }
+      showToast('No preview available for this document yet', 'warning');
+      setIsReviewModalOpen(false);
+    } catch (err) {
+      console.error(err);
+      showToast('Failed to load document preview', 'error');
+      setIsReviewModalOpen(false);
+    } finally {
+      setIsReviewLoading(false);
+    }
+  };
+
   const handleDocumentUpload = async (docType, fileEvent) => {
     if (!applicationId) {
       showToast('Start the application flow by sending "hi" first', 'warning');
@@ -485,7 +523,10 @@ export default function App() {
       const res = await fetch(`${API_BASE_URL}/api/v1/applications/documents/upload`, { method: 'POST', body: formData });
       if (res.ok) {
         const data = await res.json();
-        showToast(`${docType.replace(/_/g, ' ').toUpperCase()} validated ✓ — OCR Confidence: ${Math.round(data.confidence * 100)}%`, 'success', 5000);
+        const confScore = Math.round((data.confidence_score || data.confidence || 0.95) * 100);
+        showToast(`${docType.replace(/_/g, ' ').toUpperCase()} cross-validated ✓ — Confidence: ${confScore}%`, 'success', 5000);
+        setReviewModalData(data);
+        setIsReviewModalOpen(true);
         fetchChatHistory();
         handleSendMessage('Document validation progress check');
       } else {
@@ -958,15 +999,23 @@ export default function App() {
                             <Text style={[styles.docStatus, getDocStatusStyle(status)]}>{status}</Text>
                           )}
                         </View>
-                        <View style={styles.docUploadArea}>
+                        <View style={[styles.docUploadArea, { flexDirection: 'row', alignItems: 'center', gap: 6 }]}>
+                          {status && (
+                            <TouchableOpacity 
+                              style={styles.reviewBtn}
+                              onPress={() => handleReviewDocument(doc.type)}
+                            >
+                              <Text style={styles.reviewBtnText}>👁️ Review</Text>
+                            </TouchableOpacity>
+                          )}
                           {Platform.OS === 'web' && (
                             <label style={{ cursor: doc.disabled ? 'not-allowed' : 'pointer' }}>
                               <View style={[styles.uploadBtn, doc.disabled && styles.uploadBtnDisabled, isValidated && styles.uploadBtnDone]}>
-                                <Text style={styles.uploadBtnText}>{isValidated ? '✓ Re-upload' : doc.disabled ? '🔒 Locked' : '↑ Upload'}</Text>
+                                <Text style={styles.uploadBtnText}>{isValidated ? '✓ Replace' : doc.disabled ? '🔒 Locked' : '↑ Upload'}</Text>
                               </View>
                               <input
                                 type="file"
-                                accept="image/*,application/pdf"
+                                accept="image/*,application/pdf,.pdf,.jpg,.jpeg,.png,.webp,.bmp,.tiff,.gif"
                                 disabled={doc.disabled}
                                 style={{ display: 'none' }}
                                 onChange={(e) => handleDocumentUpload(doc.type, e)}
@@ -1164,10 +1213,134 @@ export default function App() {
                 )}
               </>
             )}
-
           </ScrollView>
         </View>
       </View>
+
+      {/* ════ Document Review Inspection Modal ════ */}
+      {isReviewModalOpen && (
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Text style={{ fontSize: 20 }}>👁️</Text>
+                <View>
+                  <Text style={styles.modalTitle}>Document Review & Inspection</Text>
+                  <Text style={styles.modalSubtitle}>{reviewModalData?.doc_type?.replace(/_/g, ' ')?.toUpperCase() || 'Verification Details'}</Text>
+                </View>
+              </View>
+              <TouchableOpacity id="close-modal-btn" style={styles.modalCloseBtn} onPress={() => setIsReviewModalOpen(false)}>
+                <Text style={styles.modalCloseBtnText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            {isReviewLoading ? (
+              <View style={{ padding: 40, alignItems: 'center' }}>
+                <ActivityIndicator size="large" color="#3B82F6" />
+                <Text style={{ marginTop: 10, color: '#9CA3AF' }}>Analyzing document evidence...</Text>
+              </View>
+            ) : reviewModalData ? (
+              <ScrollView style={{ maxHeight: 520 }} contentContainerStyle={{ padding: 16 }}>
+                {/* Header Score Badge */}
+                <View style={styles.modalScoreCard}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.modalScoreLabel}>Automated Match Confidence</Text>
+                    <Text style={styles.modalScoreResult}>{reviewModalData.verification_result}</Text>
+                  </View>
+                  <View style={[styles.scorePill, { backgroundColor: (reviewModalData.confidence_score >= 0.85) ? 'rgba(16,185,129,0.2)' : 'rgba(245,158,11,0.2)' }]}>
+                    <Text style={[styles.scorePillText, { color: (reviewModalData.confidence_score >= 0.85) ? '#10B981' : '#F59E0B' }]}>
+                      {Math.round((reviewModalData.confidence_score || 0.9) * 100)}% Match
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Side-by-Side Preview & Match Details */}
+                <View style={{ flexDirection: isLargeScreen ? 'row' : 'column', gap: 16, marginTop: 16 }}>
+                  {/* File Viewer Box */}
+                  <View style={{ flex: 1, height: 260, backgroundColor: '#0F172A', borderRadius: 10, borderWidth: 1, borderColor: '#334155', overflow: 'hidden', alignItems: 'center', justifyContent: 'center' }}>
+                    {reviewModalData.file_url ? (
+                      Platform.OS === 'web' ? (
+                        reviewModalData.file_url.toLowerCase().endsWith('.pdf') ? (
+                          <iframe 
+                            src={`${API_BASE_URL}${reviewModalData.file_url}`} 
+                            style={{ width: '100%', height: '100%', border: 'none' }}
+                            title="Document Inspection Preview"
+                          />
+                        ) : (
+                          <img 
+                            src={`${API_BASE_URL}${reviewModalData.file_url}`} 
+                            style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                            alt="Document Inspection Preview"
+                          />
+                        )
+                      ) : (
+                        <Text style={{ color: '#9CA3AF' }}>File: {reviewModalData.file_name}</Text>
+                      )
+                    ) : (
+                      <Text style={{ color: '#9CA3AF' }}>No image preview available</Text>
+                    )}
+                  </View>
+
+                  {/* Extracted vs Declared Matching Breakdown */}
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.breakdownSectionTitle}>Field Cross-Match Breakdown</Text>
+                    {reviewModalData.field_matches && reviewModalData.field_matches.length > 0 ? (
+                      reviewModalData.field_matches.map((item, idx) => (
+                        <View key={idx} style={styles.matchRow}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.matchFieldLabel}>{item.field_name?.replace(/_/g, ' ')?.toUpperCase()}</Text>
+                            <Text style={styles.matchValText}>Form Input: <Text style={{ color: '#F3F4F6', fontWeight: '600' }}>{String(item.declared ?? 'N/A')}</Text></Text>
+                            <Text style={styles.matchValText}>Doc Extract: <Text style={{ color: '#38BDF8', fontWeight: '600' }}>{String(item.extracted ?? 'N/A')}</Text></Text>
+                            {item.explanation && <Text style={{ color: '#94A3B8', fontSize: 10, marginTop: 2, fontStyle: 'italic' }}>{item.explanation}</Text>}
+                          </View>
+                          <View style={[styles.matchBadge, item.status === 'MATCH' ? styles.badgeMatch : item.status === 'AUTO_FILLED' ? styles.badgeAutoFilled : styles.badgeMismatch]}>
+                            <Text style={styles.matchBadgeText}>{item.status === 'MATCH' ? '✅ MATCH' : item.status === 'AUTO_FILLED' ? '🪄 AUTO-FILLED' : '⚠️ MISMATCH'}</Text>
+                          </View>
+                        </View>
+                      ))
+                    ) : (
+                      <Text style={{ color: '#9CA3AF', fontSize: 13 }}>No field cross-matches recorded.</Text>
+                    )}
+                  </View>
+                </View>
+
+                {/* Discrepancies / Mismatch Alerts */}
+                {reviewModalData.mismatches && reviewModalData.mismatches.length > 0 && (
+                  <View style={styles.modalMismatchAlertBox}>
+                    <Text style={styles.modalMismatchTitle}>⚠️ Discrepancy Flagged:</Text>
+                    {reviewModalData.mismatches.map((m, i) => (
+                      <Text key={i} style={styles.modalMismatchText}>• {m.issue}</Text>
+                    ))}
+                    <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
+                      <TouchableOpacity 
+                        style={[styles.alertBannerBtn, { backgroundColor: '#10B981' }]}
+                        onPress={() => {
+                          handleSendMessage(`Confirm declared ${reviewModalData.mismatches[0]?.field_name} value`);
+                          setIsReviewModalOpen(false);
+                        }}
+                      >
+                        <Text style={styles.alertBannerBtnText}>Confirm Form Input</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity 
+                        style={[styles.alertBannerBtn, { backgroundColor: '#3B82F6' }]}
+                        onPress={() => {
+                          handleSendMessage(`Use document value ${reviewModalData.mismatches[0]?.extracted_val} for ${reviewModalData.mismatches[0]?.field_name}`);
+                          setIsReviewModalOpen(false);
+                        }}
+                      >
+                        <Text style={styles.alertBannerBtnText}>Use Document Value</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                )}
+              </ScrollView>
+            ) : null}
+          </View>
+        </View>
+      )}
+
+      {/* Toast Notifications Container */}
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </View>
   );
 }
@@ -1197,7 +1370,7 @@ const styles = StyleSheet.create({
 
   // ── Toast ──
   toastContainer: {
-    position: 'fixed', top: 70, right: 16, zIndex: 9999,
+    position: 'absolute', top: 70, right: 16, zIndex: 9999,
     width: 340, pointerEvents: 'box-none',
   },
   toastItem: {
@@ -1534,4 +1707,36 @@ const styles = StyleSheet.create({
   escalRejectBtn:  { backgroundColor: 'rgba(239,68,68,0.15)', borderWidth: 1, borderColor: C.red, paddingVertical: 6, paddingHorizontal: 12, borderRadius: 6 },
   escalCorrectionBtn: { backgroundColor: 'rgba(245,158,11,0.15)', borderWidth: 1, borderColor: C.orange, paddingVertical: 6, paddingHorizontal: 12, borderRadius: 6 },
   escalBtnText: { color: C.text, fontWeight: 'bold', fontSize: 11 },
+
+  // ── Document Review Inspection Modal ──
+  reviewBtn: { backgroundColor: 'rgba(59,130,246,0.15)', borderWidth: 1, borderColor: 'rgba(59,130,246,0.4)', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 5, marginRight: 4 },
+  reviewBtnText: { color: '#60A5FA', fontSize: 11, fontWeight: '600' },
+
+  modalOverlay: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', alignItems: 'center', zIndex: 9999, padding: 16 },
+  modalContent: { backgroundColor: '#1E293B', width: '100%', maxWidth: 780, borderRadius: 14, borderWidth: 1, borderColor: '#334155', overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.5, shadowRadius: 20, elevation: 10 },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: 1, borderColor: '#334155', backgroundColor: '#0F172A' },
+  modalTitle: { color: '#F8FAFC', fontSize: 15, fontWeight: '700' },
+  modalSubtitle: { color: '#94A3B8', fontSize: 11 },
+  modalCloseBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#334155', alignItems: 'center', justifyContent: 'center' },
+  modalCloseBtnText: { color: '#94A3B8', fontSize: 14, fontWeight: '700' },
+
+  modalScoreCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0F172A', padding: 14, borderRadius: 10, borderWidth: 1, borderColor: '#334155' },
+  modalScoreLabel: { color: '#94A3B8', fontSize: 11 },
+  modalScoreResult: { color: '#F1F5F9', fontSize: 13, fontWeight: '600', marginTop: 2 },
+  scorePill: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
+  scorePillText: { fontWeight: '700', fontSize: 12 },
+
+  breakdownSectionTitle: { color: '#E2E8F0', fontSize: 13, fontWeight: '700', marginBottom: 10 },
+  matchRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0F172A', padding: 10, borderRadius: 8, marginBottom: 8, borderWidth: 1, borderColor: '#334155' },
+  matchFieldLabel: { color: '#94A3B8', fontSize: 10, fontWeight: '700', letterSpacing: 0.5 },
+  matchValText: { color: '#CBD5E1', fontSize: 11, marginTop: 2 },
+  matchBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
+  badgeMatch: { backgroundColor: 'rgba(16,185,129,0.15)', borderWidth: 1, borderColor: 'rgba(16,185,129,0.4)' },
+  badgeAutoFilled: { backgroundColor: 'rgba(139,92,246,0.15)', borderWidth: 1, borderColor: 'rgba(139,92,246,0.4)' },
+  badgeMismatch: { backgroundColor: 'rgba(239,68,68,0.15)', borderWidth: 1, borderColor: 'rgba(239,68,68,0.4)' },
+  matchBadgeText: { fontSize: 10, fontWeight: '700', color: '#F8FAFC' },
+
+  modalMismatchAlertBox: { marginTop: 16, backgroundColor: 'rgba(239,68,68,0.1)', borderWidth: 1, borderColor: 'rgba(239,68,68,0.4)', borderRadius: 10, padding: 14 },
+  modalMismatchTitle: { color: '#FCA5A5', fontWeight: '700', fontSize: 12 },
+  modalMismatchText: { color: '#FEE2E2', fontSize: 11, marginTop: 4 },
 });

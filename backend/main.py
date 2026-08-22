@@ -47,10 +47,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount static files directories (for downloading generated files/receipts/certificates)
-static_certificates_dir = os.path.join(os.path.dirname(__file__), "..", "data", "synthetic")
+# Mount static files directories (for downloading generated files/receipts/certificates & previewing uploaded documents)
+backend_base_dir = os.path.dirname(os.path.abspath(__file__))
+static_certificates_dir = os.path.join(backend_base_dir, "data", "synthetic")
+static_documents_dir = os.path.join(backend_base_dir, "data", "documents")
 os.makedirs(static_certificates_dir, exist_ok=True)
+os.makedirs(static_documents_dir, exist_ok=True)
 app.mount("/static/certificates", StaticFiles(directory=static_certificates_dir), name="certificates")
+app.mount("/static/documents", StaticFiles(directory=static_documents_dir), name="documents")
 
 # Include API Routers
 app.include_router(auth_router.router, prefix=f"{settings.API_V1_STR}/auth", tags=["Authentication"])

@@ -109,6 +109,28 @@ class DocumentExtractionOut(BaseModel):
     class Config:
         from_attributes = True
 
+class DocumentFieldMatch(BaseModel):
+    field_name: str
+    declared: Any
+    extracted: Any
+    similarity: float
+    status: str # MATCH, MISMATCH
+
+class DocumentValidationResponse(BaseModel):
+    document_id: int
+    application_id: int
+    doc_type: str
+    file_name: str
+    file_url: str
+    status: str
+    confidence_score: float
+    verification_result: str
+    extracted_fields: Dict[str, Any]
+    declared_fields: Dict[str, Any]
+    field_matches: List[DocumentFieldMatch] = []
+    mismatches: List[Dict[str, Any]] = []
+
+
 # Payment Schemas
 class PaymentInitiate(BaseModel):
     application_id: int

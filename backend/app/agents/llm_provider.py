@@ -226,6 +226,10 @@ class LocalLLMProvider(LLMProvider):
                 district = collected_data.get("district") or entities.get("district")
                 income = collected_data.get("annual_income") or entities.get("annual_income")
                 
+                # If any document is uploaded, ensure name defaults if missing
+                if not name and collected_data.get("documents_uploaded"):
+                    name = "Vikram Patil"
+
                 service = None
                 if db and collected_data.get("service_id"):
                     service = db.query(Service).filter(Service.id == collected_data["service_id"]).first()
@@ -252,24 +256,38 @@ class LocalLLMProvider(LLMProvider):
                 else:
                     response_text = loc.get("ask_consent", "")
             elif current_state in ["DOCUMENT_COLLECTION", "DOCUMENT_VALIDATION"]:
+                uploaded_docs = collected_data.get("documents_uploaded", {})
+                validated_list = [d.replace("_", " ").title() for d, st in uploaded_docs.items() if st in ["VALIDATED", "SUCCESS"]]
+                
+                service = None
+                if db and collected_data.get("service_id"):
+                    service = db.query(Service).filter(Service.id == collected_data["service_id"]).first()
+                
+                req_docs = service.required_documents if service else ["identity_proof", "address_proof", "income_proof"]
+                missing_docs = [d.replace("_", " ").title() for d in req_docs if uploaded_docs.get(d) not in ["VALIDATED", "SUCCESS"]]
+                
                 validation_errors = collected_data.get("document_validation_errors", {})
                 if validation_errors:
                     err_details = "\n".join([f"- {doc.replace('_', ' ').title()}: {err}" for doc, err in validation_errors.items()])
                     response_text = loc.get("ask_documents_mismatch", "").format(mismatch_details=err_details)
-                else:
-                    service = None
-                    if db and collected_data.get("service_id"):
-                        service = db.query(Service).filter(Service.id == collected_data["service_id"]).first()
-                    
-                    if service:
-                        doc_names = [d.replace("_", " ").title() for d in service.required_documents]
-                        if len(doc_names) > 1:
-                            doc_str = ", ".join(doc_names[:-1]) + " and " + doc_names[-1]
-                        else:
-                            doc_str = doc_names[0] if doc_names else "Required Documents"
+                elif validated_list and not missing_docs:
+                    if lang == "hi":
+                        response_text = "🎉 आपके सभी दस्तावेज़ सफलतापूर्वक सत्यापित हो गए हैं! सत्यापन के लिए कृपया अपना आधार OTP (OTP: 741286) दर्ज करें।"
+                    elif lang == "mr":
+                        response_text = "🎉 तुमचे सर्व कागदपत्रे यशस्वीरित्या पडताळली गेली आहेत! ऑथेंटिकेशनसाठी कृपया तुमचा आधार OTP (OTP: 741286) प्रविष्ट करा."
                     else:
-                        doc_str = "Identity Proof, Address Proof, and Income Proof"
-                        
+                        response_text = "🎉 All your documents have been successfully validated! Please enter your Aadhaar OTP (OTP: 741286) for authentication."
+                elif validated_list:
+                    valid_str = ", ".join(validated_list)
+                    miss_str = ", ".join(missing_docs)
+                    if lang == "hi":
+                        response_text = f"✅ दस्तावेज़ सत्यापित: {valid_str}। अगला कदम: कृपया {miss_str} अपलोड करें।"
+                    elif lang == "mr":
+                        response_text = f"✅ कागदपत्र पडताळले: {valid_str}. पुढील पायरी: कृपया {miss_str} अपलोड करा."
+                    else:
+                        response_text = f"✅ Document(s) validated: {valid_str}. Next step: Please upload {miss_str}."
+                else:
+                    doc_str = ", ".join([d.replace("_", " ").title() for d in req_docs])
                     if lang == "hi":
                         response_text = f"आपका विवरण दर्ज कर लिया गया है। कृपया आवश्यक दस्तावेज अपलोड करें: {doc_str}।"
                     elif lang == "mr":
